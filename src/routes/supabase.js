@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { supabase, fetchUserByAuthId, fetchUserByEmail, fetchAllUsers } from '../config/supabase.js';
+import { supabase, db, getUsers, getUserBy } from '../config/supabase.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
@@ -20,7 +20,7 @@ router.get('/health', async (_req, res) => {
 
 router.get('/me', authMiddleware, async (req, res) => {
   try {
-    const row = await fetchUserByAuthId(String(req.user.id));
+    const row = await getUserBy('auth_user_id', String(req.user.id));
     if (!row) return res.status(404).json({ error: 'User not found in Supabase' });
     res.json({ user: row });
   } catch (e) {
@@ -30,7 +30,7 @@ router.get('/me', authMiddleware, async (req, res) => {
 
 router.get('/users', authMiddleware, async (_req, res) => {
   try {
-    const rows = await fetchAllUsers();
+    const rows = await getUsers();
     res.json({ users: rows });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -78,7 +78,7 @@ router.post('/auth/login', async (req, res) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return res.status(401).json({ error: error.message });
 
-    const userData = await fetchUserByEmail(email);
+    const userData = await getUserBy('email', email);
     res.json({
       token: data.session?.access_token,
       user: userData || { email },
