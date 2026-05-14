@@ -24,8 +24,13 @@ export async function authMiddleware(req, res, next) {
     const token = header.split(' ')[1];
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    const user = await getUser(decoded.id);
-    if (!user) return res.status(401).json({ error: 'User not found' });
+    let user;
+    if (decoded.role === 'admin') {
+      user = { id: decoded.id, username: decoded.username, email: decoded.email || '', role: 'admin', is_flagged: false, is_banned: false };
+    } else {
+      user = await getUser(decoded.id);
+      if (!user) return res.status(401).json({ error: 'User not found' });
+    }
     if (user.is_banned) return res.status(403).json({ error: 'Account banned' });
 
     req.user = user;
