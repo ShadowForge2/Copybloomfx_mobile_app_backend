@@ -9,11 +9,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
   process.exit(1);
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-export const db = supabaseServiceKey
+const serviceClient = supabaseServiceKey
   ? createClient(supabaseUrl, supabaseServiceKey)
-  : supabase;
+  : null;
+
+export const supabase = serviceClient || createClient(supabaseUrl, supabaseAnonKey);
+
+export const db = serviceClient || supabase;
 
 // ------------------------------------------------
 //  Generic helpers (used internally by data.js)
