@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { db, supabase, getUser, getUserBy, updateUser, getProfile, createUser, createProfile, getRank, getUsers, createNotification, createAuditLog, createSession, getProfileByReferralCode } from '../config/data.js';
+import { getUser, getUserBy, updateUser, getProfile, createUser, createProfile, getRank, getUsers, createNotification, createAuditLog, createSession, getProfileByReferralCode } from '../config/data.js';
 import bcrypt from 'bcryptjs';
 import { signToken, authMiddleware, adminOnly } from '../middleware/auth.js';
 import { generateReferralCode } from '../utils/referral.js';
@@ -69,36 +69,15 @@ router.post('/signup', async (req, res) => {
 
     const clientIp = req.ip || req.connection.remoteAddress || '';
 
-    let user;
-    if (USE_SQLITE) {
-      const hash = await bcrypt.hash(password, 10);
-      user = await createUser({
-        username: username.trim(),
-        email: email ? email.trim() : null,
-        role: 'user',
-        status: 'active',
-        password_hash: hash,
-        last_login_ip: clientIp,
-      });
-    } else {
-      console.log('[SIGNUP] calling supabase.auth.signUp');
-      const { data: authData, error: authErr } = await supabase.auth.signUp({
-        email: email || `${username}@bloomfx.app`,
-        password,
-        options: { data: { username: username.trim() } },
-      });
-      if (authErr) { console.log('[SIGNUP FAIL] auth_error:', authErr.message); return res.status(400).json({ error: authErr.message }); }
-      if (!authData.user) { console.log('[SIGNUP FAIL] no_user'); return res.status(400).json({ error: 'Sign up failed' }); }
-
-      user = await createUser({
-        auth_user_id: authData.user.id,
-        username: username.trim(),
-        email: email ? email.trim() : null,
-        role: 'user',
-        status: 'active',
-        last_login_ip: clientIp,
-      });
-    }
+    const hash = await bcrypt.hash(password, 10);
+    user = await createUser({
+      username: username.trim(),
+      email: email ? email.trim() : null,
+      role: 'user',
+      status: 'active',
+      password_hash: hash,
+      last_login_ip: clientIp,
+    });
 
     let refCode = generateReferralCode();
     const existingRef = await getProfile(refCode).catch(() => null);
@@ -168,15 +147,7 @@ router.post('/login', async (req, res) => {
       // Password verification: try DB first, then env fallback
       let passwordValid = false;
       if (adminDbUser && adminDbUser.password_hash) {
-        if (USE_SQLITE) {
-          passwordValid = await bcrypt.compare(password, adminDbUser.password_hash);
-        } else {
-          const { error: authErr } = await db.auth.signInWithPassword({
-            email: adminDbUser.email,
-            password,
-          }).catch(() => ({ error: { message: 'failed' } }));
-          passwordValid = !authErr;
-        }
+        passwordValid = await bcrypt.compare(password, adminDbUser.password_hash);
       }
       if (!passwordValid) {
         passwordValid = (password === ADMIN_PASSWORD);
@@ -228,16 +199,8 @@ router.post('/login', async (req, res) => {
     await updateUser(user.id, { last_login_ip: clientIp }).catch(() => {});
     await autoFlagSameIp(clientIp, user.id);
 
-    if (USE_SQLITE) {
-      const valid = await bcrypt.compare(password, user.password_hash || '');
-      if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
-    } else {
-      const { error: authErr } = await db.auth.signInWithPassword({
-        email: user.email || `${username.trim()}@bloomfx.app`,
-        password,
-      });
-      if (authErr) return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    const valid = await bcrypt.compare(password, user.password_hash || '');
+    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
     let profile = await getProfile(user.id);
     if (!profile) {
       let refCode = generateReferralCode();
@@ -369,16 +332,8 @@ router.post('/admin/reset-password', authMiddleware, adminOnly, async (req, res)
     const target = await getUser(userId).catch(() => null);
     if (!target) return res.status(404).json({ error: 'User not found' });
 
-    if (USE_SQLITE) {
-      const hash = await bcrypt.hash(newPassword, 10);
-      await updateUser(userId, { password_hash: hash });
-    } else {
-      const { error: authErr } = await db.auth.admin.updateUserById(
-        target.auth_user_id,
-        { password: newPassword }
-      );
-      if (authErr) return res.status(500).json({ error: authErr.message });
-    }
+    const hash = await bcrypt.hash(newPassword, 10);
+    await updateUser(userId, { password_hash: hash });
 
     createAuditLog({
       user_id: req.user.id, target_user_id: userId, action: 'admin.password_reset',
