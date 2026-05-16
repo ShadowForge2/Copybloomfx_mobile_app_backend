@@ -70,7 +70,7 @@ router.post('/signup', async (req, res) => {
     const clientIp = req.ip || req.connection.remoteAddress || '';
 
     const hash = await bcrypt.hash(password, 10);
-    user = await createUser({
+    const user = await createUser({
       username: username.trim(),
       email: email ? email.trim() : null,
       role: 'user',
