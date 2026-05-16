@@ -91,7 +91,7 @@ router.post('/signup', async (req, res) => {
 
     const profile = await createProfile({
       user_id: user.id,
-      rank_id: null,
+      rank_id: 1,
       referral_code: refCode,
       referred_by: referredBy,
     });
@@ -208,7 +208,7 @@ router.post('/login', async (req, res) => {
       if (existingRef) refCode = generateReferralCode();
       profile = await createProfile({
         user_id: user.id,
-        rank_id: null,
+        rank_id: 1,
         referral_code: refCode,
       });
     }
