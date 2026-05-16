@@ -195,7 +195,10 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    const user = await getUserBy('username', username.trim()).catch(() => null);
+    let user = await getUserBy('username', username.trim()).catch(() => null);
+    if (!user) {
+      user = await getUserBy('email', username.trim()).catch(() => null);
+    }
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     if (user.is_banned) return res.status(403).json({ error: 'Account banned' });
 
