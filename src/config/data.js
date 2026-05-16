@@ -260,19 +260,18 @@ export async function getLastDailyReward(userId) {
     return r ? sq(r) : null;
   }
   const { data, error } = await supabase.from('daily_rewards').select('*')
-    .eq('user_id', userId).order('claimed_at', { ascending: false }).limit(1).single();
-  if (error && error.code === 'PGRST116') return null;
+    .eq('user_id', userId).order('claimed_at', { ascending: false }).limit(1);
   if (error) throw error;
-  return data;
+  return data && data.length > 0 ? data[0] : null;
 }
 
 export async function createDailyReward(data) {
   if (USE_SQLITE) {
     return sq(await DailyRewardModel.create(data));
   }
-  const { data: result, error } = await supabase.from('daily_rewards').insert(data).select().single();
+  const { error } = await supabase.from('daily_rewards').insert(data);
   if (error) throw error;
-  return result;
+  return data;
 }
 
 export async function sumDailyRewards(userId) {
