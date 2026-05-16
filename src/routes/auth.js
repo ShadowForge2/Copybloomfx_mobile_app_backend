@@ -45,22 +45,26 @@ function profileResponse(p, rank) {
 router.post('/signup', async (req, res) => {
   try {
     const { username, email, password, referrerCode } = req.body;
+    console.log('[SIGNUP REQ]', JSON.stringify({ username, hasEmail: !!email, hasPassword: !!password }));
     if (!username || !password) {
+      console.log('[SIGNUP FAIL] missing_fields');
       return res.status(400).json({ error: 'Username and password required' });
     }
     if (username.length < 3) {
+      console.log('[SIGNUP FAIL] username_short');
       return res.status(400).json({ error: 'Username must be at least 3 characters' });
     }
     if (password.length < 6) {
+      console.log('[SIGNUP FAIL] password_short');
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
     const existing = await getUserBy('username', username.trim()).catch(() => null);
-    if (existing) return res.status(400).json({ error: 'Username already taken' });
+    if (existing) { console.log('[SIGNUP FAIL] username_taken'); return res.status(400).json({ error: 'Username already taken' }); }
 
     if (email) {
       const existingEmail = await getUserBy('email', email.trim()).catch(() => null);
-      if (existingEmail) return res.status(400).json({ error: 'Email already taken' });
+      if (existingEmail) { console.log('[SIGNUP FAIL] email_taken'); return res.status(400).json({ error: 'Email already taken' }); }
     }
 
     const clientIp = req.ip || req.connection.remoteAddress || '';
@@ -77,13 +81,14 @@ router.post('/signup', async (req, res) => {
         last_login_ip: clientIp,
       });
     } else {
+      console.log('[SIGNUP] calling db.auth.signUp');
       const { data: authData, error: authErr } = await db.auth.signUp({
         email: email || `${username}@bloomfx.app`,
         password,
         options: { data: { username: username.trim() } },
       });
-      if (authErr) return res.status(400).json({ error: authErr.message });
-      if (!authData.user) return res.status(400).json({ error: 'Sign up failed' });
+      if (authErr) { console.log('[SIGNUP FAIL] auth_error:', authErr.message); return res.status(400).json({ error: authErr.message }); }
+      if (!authData.user) { console.log('[SIGNUP FAIL] no_user'); return res.status(400).json({ error: 'Sign up failed' }); }
 
       user = await createUser({
         auth_user_id: authData.user.id,
