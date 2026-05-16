@@ -15,3 +15,13 @@ export function isSameDay(d1, d2) {
     d1.getMonth() === d2.getMonth() &&
     d1.getDate() === d2.getDate();
 }
+
+// Midnight West African Time (WAT = UTC+1) as UTC Date
+export function getMidnightWAT() {
+  const now = new Date();
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  const watOffset = 60 * 60000; // WAT is UTC+1 = +60 minutes
+  const nowWAT = new Date(utc + watOffset);
+  const todayWAT = new Date(Date.UTC(nowWAT.getUTCFullYear(), nowWAT.getUTCMonth(), nowWAT.getUTCDate()));
+  return new Date(todayWAT.getTime() - watOffset);
+}

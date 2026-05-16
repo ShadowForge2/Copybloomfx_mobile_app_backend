@@ -1,11 +1,29 @@
 import { Router } from 'express';
-import { db, getUser, getUserBy, getProfile, createUser, createProfile, getRank } from '../config/supabase.js';
+import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import { db, getUser, getUserBy, updateUser, getProfile, createUser, createProfile, getRank, getUsers, createNotification, createAuditLog, createSession, getProfileByReferralCode } from '../config/data.js';
+import bcrypt from 'bcryptjs';
 import { signToken, authMiddleware, adminOnly } from '../middleware/auth.js';
 import { generateReferralCode } from '../utils/referral.js';
 import { toNum } from '../utils/helpers.js';
 
-const ADMIN_EMAIL = 'bashirabdulganiyy9@gmail.com';
-const ADMIN_PASSWORD = '1234567890';
+const USE_SQLITE = process.env.USE_SQLITE === 'true';
+
+async function autoFlagSameIp(ip, excludeUserId) {
+  if (!ip || ip === '::1' || ip === '127.0.0.1' || ip === '::ffff:127.0.0.1') return;
+  const users = await getUsers({ last_login_ip: ip }).catch(() => []);
+  if (users.length >= 2) {
+    for (const u of users) {
+      if (!u.is_flagged && u.id !== excludeUserId) {
+        await updateUser(u.id, { is_flagged: true }).catch(() => {});
+        await createNotification(u.id, 'Account Flagged', `Your account has been flagged due to multiple accounts sharing the same IP address (${ip}). If you believe this is an error, please contact support.`, 'warning').catch(() => {});
+      }
+    }
+  }
+}
+
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'bashirabdulganiyy9@gmail.com';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '1234567890';
 
 const router = Router();
 
@@ -26,7 +44,7 @@ function profileResponse(p, rank) {
 
 router.post('/signup', async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, email, password, referrerCode } = req.body;
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password required' });
     }
@@ -45,34 +63,66 @@ router.post('/signup', async (req, res) => {
       if (existingEmail) return res.status(400).json({ error: 'Email already taken' });
     }
 
-    const { data: authData, error: authErr } = await db.auth.signUp({
-      email: email || `${username}@bloomfx.app`,
-      password,
-      options: { data: { username: username.trim() } },
-    });
-    if (authErr) return res.status(400).json({ error: authErr.message });
-    if (!authData.user) return res.status(400).json({ error: 'Sign up failed' });
+    const clientIp = req.ip || req.connection.remoteAddress || '';
+
+    let user;
+    if (USE_SQLITE) {
+      const hash = await bcrypt.hash(password, 10);
+      user = await createUser({
+        username: username.trim(),
+        email: email ? email.trim() : null,
+        role: 'user',
+        status: 'active',
+        password_hash: hash,
+        last_login_ip: clientIp,
+      });
+    } else {
+      const { data: authData, error: authErr } = await db.auth.signUp({
+        email: email || `${username}@bloomfx.app`,
+        password,
+        options: { data: { username: username.trim() } },
+      });
+      if (authErr) return res.status(400).json({ error: authErr.message });
+      if (!authData.user) return res.status(400).json({ error: 'Sign up failed' });
+
+      user = await createUser({
+        auth_user_id: authData.user.id,
+        username: username.trim(),
+        email: email ? email.trim() : null,
+        role: 'user',
+        status: 'active',
+        last_login_ip: clientIp,
+      });
+    }
 
     let refCode = generateReferralCode();
     const existingRef = await getProfile(refCode).catch(() => null);
     if (existingRef) refCode = generateReferralCode();
 
-    const user = await createUser({
-      auth_user_id: authData.user.id,
-      username: username.trim(),
-      email: email ? email.trim() : null,
-      role: 'user',
-      status: 'active',
-    });
+    let referredBy = null;
+    if (referrerCode) {
+      const refProfile = await getProfileByReferralCode(referrerCode.trim()).catch(() => null);
+      if (refProfile && refProfile.user_id !== user.id) referredBy = refProfile.user_id;
+    }
 
     const profile = await createProfile({
       user_id: user.id,
-      rank_id: 1,
+      rank_id: null,
       referral_code: refCode,
+      referred_by: referredBy,
     });
 
     const rank = await getRank(profile.rank_id);
+    await autoFlagSameIp(clientIp, user.id);
+
     const token = signToken(user);
+
+    createAuditLog({
+      user_id: user.id, action: 'auth.signup',
+      description: `User "${user.username}" signed up`,
+      metadata: JSON.stringify({ username: user.username, email, referrerCode: referrerCode || null }),
+      ip_address: clientIp,
+    }).catch(() => {});
 
     res.status(201).json({
       token,
@@ -97,20 +147,58 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Username and password required' });
     }
 
-    const isAdminLogin = username.trim().toLowerCase() === ADMIN_EMAIL;
-    if (isAdminLogin) {
-      if (password !== ADMIN_PASSWORD) {
+    // Look up admin in DB by email or username (supports multiple admins)
+    let adminDbUser = await getUserBy('username', username.trim()).catch(() => null);
+    if (!adminDbUser) {
+      adminDbUser = await getUserBy('email', username.trim()).catch(() => null);
+    }
+    if (adminDbUser && adminDbUser.role !== 'admin') adminDbUser = null;
+
+    const isAdminEmail = username.trim().toLowerCase() === ADMIN_EMAIL;
+
+    if (isAdminEmail || adminDbUser) {
+      const clientIp = req.ip || req.connection.remoteAddress || '';
+
+      // Password verification: try DB first, then env fallback
+      let passwordValid = false;
+      if (adminDbUser && adminDbUser.password_hash) {
+        if (USE_SQLITE) {
+          passwordValid = await bcrypt.compare(password, adminDbUser.password_hash);
+        } else {
+          const { error: authErr } = await db.auth.signInWithPassword({
+            email: adminDbUser.email,
+            password,
+          }).catch(() => ({ error: { message: 'failed' } }));
+          passwordValid = !authErr;
+        }
+      }
+      if (!passwordValid) {
+        passwordValid = (password === ADMIN_PASSWORD);
+      }
+      if (!passwordValid) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
+
       const adminUser = {
-        id: 'admin',
-        username: 'admin',
-        email: ADMIN_EMAIL,
+        id: adminDbUser ? adminDbUser.id : '00000000-0000-0000-0000-000000000000',
+        username: adminDbUser ? adminDbUser.username : 'admin',
+        email: adminDbUser ? adminDbUser.email : ADMIN_EMAIL,
         role: 'admin',
-        is_flagged: false,
-        is_banned: false,
+        is_flagged: adminDbUser ? adminDbUser.is_flagged || false : false,
+        is_banned: adminDbUser ? adminDbUser.is_banned || false : false,
       };
+
       const token = signToken(adminUser);
+
+      // NO session creation — allows multi-device admin login
+
+      createAuditLog({
+        user_id: adminUser.id, action: 'auth.login',
+        description: 'Admin logged in',
+        metadata: JSON.stringify({ username: adminUser.username, role: 'admin' }),
+        ip_address: clientIp,
+      }).catch(() => {});
+
       return res.json({
         token,
         user: {
@@ -118,9 +206,10 @@ router.post('/login', async (req, res) => {
           username: adminUser.username,
           email: adminUser.email,
           role: 'admin',
-          isFlagged: false,
-          isBanned: false,
-          profile: null,
+          status: adminDbUser ? adminDbUser.status : 'active',
+          isFlagged: adminUser.is_flagged,
+          isBanned: adminUser.is_banned,
+          createdAt: adminDbUser ? adminDbUser.created_at : new Date().toISOString(),
         },
       });
     }
@@ -129,15 +218,47 @@ router.post('/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
     if (user.is_banned) return res.status(403).json({ error: 'Account banned' });
 
-    const { data: authData, error: authErr } = await db.auth.signInWithPassword({
-      email: user.email || `${username.trim()}@bloomfx.app`,
-      password,
-    });
-    if (authErr) return res.status(401).json({ error: 'Invalid credentials' });
+    const clientIp = req.ip || req.connection.remoteAddress || '';
+    await updateUser(user.id, { last_login_ip: clientIp }).catch(() => {});
+    await autoFlagSameIp(clientIp, user.id);
 
-    const profile = await getProfile(user.id);
+    if (USE_SQLITE) {
+      const valid = await bcrypt.compare(password, user.password_hash || '');
+      if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+    } else {
+      const { error: authErr } = await db.auth.signInWithPassword({
+        email: user.email || `${username.trim()}@bloomfx.app`,
+        password,
+      });
+      if (authErr) return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    let profile = await getProfile(user.id);
+    if (!profile) {
+      let refCode = generateReferralCode();
+      const existingRef = await getProfile(refCode).catch(() => null);
+      if (existingRef) refCode = generateReferralCode();
+      profile = await createProfile({
+        user_id: user.id,
+        rank_id: null,
+        referral_code: refCode,
+      });
+    }
     const rank = profile ? await getRank(profile.rank_id) : null;
     const token = signToken(user);
+
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    createSession({
+      user_id: user.id, token_hash: tokenHash,
+      ip_address: clientIp, user_agent: req.headers['user-agent'] || null,
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    }).catch(() => {});
+
+    createAuditLog({
+      user_id: user.id, action: 'auth.login',
+      description: `User "${user.username}" logged in`,
+      metadata: JSON.stringify({ username: user.username, role: user.role }),
+      ip_address: clientIp,
+    }).catch(() => {});
 
     res.json({
       token,
@@ -155,7 +276,60 @@ router.post('/login', async (req, res) => {
   }
 });
 
-router.post('/logout', (_req, res) => {
+router.post('/refresh', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token required' });
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET, { ignoreExpiration: true });
+    } catch (e) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    let user;
+
+    if (decoded.role === 'admin') {
+      user = { id: decoded.id, username: decoded.username, email: decoded.email || '', role: 'admin' };
+    } else {
+      user = await getUser(decoded.id);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      if (user.is_banned) return res.status(403).json({ error: 'Account banned' });
+    }
+
+    const newToken = signToken(user);
+
+    // Skip session for admin (multi-device support)
+    if (decoded.role !== 'admin') {
+      const tokenHash = crypto.createHash('sha256').update(newToken).digest('hex');
+      await createSession({
+        user_id: decoded.id,
+        token_hash: tokenHash,
+        ip_address: req.ip || req.connection.remoteAddress || '',
+        user_agent: req.headers['user-agent'] || null,
+        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      }).catch(() => {});
+    }
+
+    createAuditLog({
+      user_id: user.id, action: 'auth.token_refresh',
+      description: `Token refreshed for "${user.username}"`,
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
+    res.json({ token: newToken, user: { id: user.id, username: user.username, email: user.email, role: user.role } });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Refresh failed' });
+  }
+});
+
+router.post('/logout', (req, res) => {
+  createAuditLog({
+    user_id: req.user?.id, action: 'auth.logout',
+    description: req.user ? `User "${req.user.username}" logged out` : 'User logged out',
+    ip_address: req.ip || req.connection.remoteAddress || '',
+  }).catch(() => {});
   res.json({ ok: true });
 });
 
@@ -188,12 +362,22 @@ router.post('/admin/reset-password', authMiddleware, adminOnly, async (req, res)
     const target = await getUser(userId).catch(() => null);
     if (!target) return res.status(404).json({ error: 'User not found' });
 
-    const { error: authErr } = await db.auth.admin.updateUserById(
-      target.auth_user_id,
-      { password: newPassword }
-    );
-    if (authErr) return res.status(500).json({ error: authErr.message });
+    if (USE_SQLITE) {
+      const hash = await bcrypt.hash(newPassword, 10);
+      await updateUser(userId, { password_hash: hash });
+    } else {
+      const { error: authErr } = await db.auth.admin.updateUserById(
+        target.auth_user_id,
+        { password: newPassword }
+      );
+      if (authErr) return res.status(500).json({ error: authErr.message });
+    }
 
+    createAuditLog({
+      user_id: req.user.id, target_user_id: userId, action: 'admin.password_reset',
+      description: `Admin reset password for user "${target.username}"`,
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message || 'Reset failed' });

@@ -4,10 +4,12 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import { syncDatabase } from './models/index.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import adminRoutes from './routes/admin.js';
 import supabaseRoutes from './routes/supabase.js';
+import { getDeposits, updateDeposit, createAuditLog } from './config/data.js';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -59,6 +61,49 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+// ----- Server-side scheduled tasks -----
+
+const EXPIRY_CHECK_INTERVAL = 5 * 60 * 1000; // every 5 minutes
+
+async function autoExpireDeposits() {
+  try {
+    const pending = await getDeposits({ status: 'pending' }).catch(() => []);
+    const now = new Date();
+    let expiredCount = 0;
+    for (const d of pending) {
+      if (d.expires_at && new Date(d.expires_at) < now) {
+        await updateDeposit(d.id, { status: 'expired' }).catch(() => {});
+        await createAuditLog({
+          user_id: d.user_id, action: 'deposit.auto_expire',
+          entity_type: 'deposit', entity_id: d.id,
+          description: `Deposit $${parseFloat(d.amount) || 0} auto-expired (server cron)`,
+          metadata: JSON.stringify({ amount: parseFloat(d.amount) || 0, expiredAt: d.expires_at }),
+          ip_address: 'system',
+        }).catch(() => {});
+        expiredCount++;
+      }
+    }
+    if (expiredCount > 0) {
+      console.log(`[CRON] Auto-expired ${expiredCount} deposit(s)`);
+    }
+  } catch (e) {
+    console.error('[CRON] Auto-expiry error:', e.message);
+  }
+}
+
+if (process.env.USE_SQLITE === 'true') {
+  syncDatabase().then(() => {
+    console.log(`[DB] SQLite ready at ../persistent_database/bloomfx_dev.db`);
+  });
+}
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`BloomFX API running at http://localhost:${PORT}`);
+  if (process.env.USE_SQLITE === 'true') console.log('[DB] Using SQLite (local)');
+  else console.log('[DB] Using Supabase (remote)');
+
+  // Start background tasks after server is running
+  autoExpireDeposits(); // run immediately on startup
+  setInterval(autoExpireDeposits, EXPIRY_CHECK_INTERVAL);
+  console.log(`[CRON] Deposit expiry checker active every ${EXPIRY_CHECK_INTERVAL / 60000} minutes`);
 });

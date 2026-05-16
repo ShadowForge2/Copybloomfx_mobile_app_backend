@@ -1,17 +1,17 @@
 import { Router } from 'express';
 import {
   db, getUser, getUserBy, getProfile, updateProfile, getRank, getAllRanks,
-  getDeposits, createDeposit,
+  getDeposit, getDeposits, createDeposit,
   getWithdrawals, createWithdrawal,
   getCopyTrades, countCopyTrades, createCopyTrade,
   getLastDailyReward, createDailyReward,
   getPromoCodeByCode, getPromoRedemption, createPromoRedemption, updatePromoCode,
   getNotifications, markNotificationsRead,
-  getProfileByReferralCode,
-} from '../config/supabase.js';
+  getProfileByReferralCode, createAuditLog,
+} from '../config/data.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { toNum, addDays, isSameDay } from '../utils/helpers.js';
-import { NETWORKS, getRandomWallet } from '../utils/wallets.js';
+import { toNum, addDays, isSameDay, getMidnightWAT } from '../utils/helpers.js';
+import { NETWORKS, assignWallet, getAssignment, releaseAssignment } from '../utils/wallets.js';
 import { paystackInit, paystackVerify, convertNGNtoUSD } from '../utils/paystack.js';
 
 const router = Router();
@@ -27,14 +27,26 @@ async function updateUserRank(userId) {
   const profile = await getProfile(userId);
   if (!profile) return null;
   const total = toNum(profile.locked_balance) + toNum(profile.withdrawable_balance);
+  if (total <= 0) {
+    if (profile.rank_id !== null) await updateProfile(userId, { rank_id: null });
+    return null;
+  }
   const ranks = await getAllRanks();
-  let newRankId = profile.rank_id;
+  let newRankId = null;
   for (const r of ranks) {
-    if (total >= toNum(r.min_balance) && total <= toNum(r.max_balance)) { newRankId = r.id; break; }
-    if (total >= toNum(r.min_balance)) newRankId = r.id;
+    if (total >= toNum(r.min_balance)) {
+      if (r.max_balance === null || total <= toNum(r.max_balance)) {
+        newRankId = r.id;
+        break;
+      }
+    }
   }
   if (newRankId !== profile.rank_id) await updateProfile(userId, { rank_id: newRankId });
-  return getRank(newRankId);
+  return newRankId ? getRank(newRankId) : null;
+}
+
+function rankMax(r) {
+  return r.max_balance !== null && r.max_balance !== undefined ? toNum(r.max_balance) : 999999;
 }
 
 function profileToJson(p, rank) {
@@ -46,9 +58,10 @@ function profileToJson(p, rank) {
     totalReferrals: p?.total_referrals ?? 0,
     validReferrals: p?.valid_referrals ?? 0,
     referralEarnings: toNum(p?.referral_earnings),
+    profilePicture: p?.profile_picture || null,
     rank: rank ? {
       id: rank.id, name: rank.name,
-      minBalance: toNum(rank.min_balance), maxBalance: toNum(rank.max_balance),
+      minBalance: toNum(rank.min_balance), maxBalance: rankMax(rank),
       dailyProfitPct: toNum(rank.daily_profit_pct),
       copyTradesLimit: rank.copy_trades_limit, color: rank.color,
     } : null,
@@ -85,8 +98,27 @@ router.put('/profile', async (req, res) => {
   }
 });
 
+async function expirePendingDeposits(userId, ip) {
+  const pending = await getDeposits({ user_id: userId, status: 'pending' }).catch(() => []);
+  const now = new Date();
+  for (const d of pending) {
+    if (d.expires_at && new Date(d.expires_at) < now) {
+      await updateDeposit(d.id, { status: 'expired' }).catch(() => {});
+      createAuditLog({
+        user_id: userId, action: 'deposit.auto_expire',
+        entity_type: 'deposit', entity_id: d.id,
+        description: `Deposit auto-expired on login/dashboard`,
+        metadata: JSON.stringify({ amount: toNum(d.amount) }),
+        ip_address: ip || '',
+      }).catch(() => {});
+    }
+  }
+}
+
 router.get('/dashboard', async (req, res) => {
   try {
+    await updateUserRank(req.user.id);
+    await expirePendingDeposits(req.user.id, req.ip || req.connection.remoteAddress || '');
     const profile = await getProfile(req.user.id);
     const rank = profile ? await getRank(profile.rank_id) : null;
     const limit = rank?.copy_trades_limit ?? 1;
@@ -100,10 +132,16 @@ router.get('/dashboard', async (req, res) => {
 
     const canClaimDaily = !lastReward || !isSameDay(new Date(lastReward.claimed_at), new Date());
     const total = toNum(profile?.locked_balance) + toNum(profile?.withdrawable_balance);
-    let currentRankId = profile?.rank_id ?? 1;
-    for (const r of ranks) {
-      if (total >= toNum(r.min_balance) && total <= toNum(r.max_balance)) { currentRankId = r.id; break; }
-      if (total >= toNum(r.min_balance)) currentRankId = r.id;
+    let currentRankId = null;
+    if (total > 0) {
+      for (const r of ranks) {
+        if (total >= toNum(r.min_balance)) {
+          if (r.max_balance === null || total <= toNum(r.max_balance)) {
+            currentRankId = r.id;
+            break;
+          }
+        }
+      }
     }
 
     res.json({
@@ -112,7 +150,7 @@ router.get('/dashboard', async (req, res) => {
       copyTradesLimit: limit,
       pendingDeposits: pendingDepositsList.map((d) => ({ id: d.id, amount: toNum(d.amount), network: d.network, createdAt: d.created_at, expiresAt: d.expires_at })),
       canClaimDaily, dailyRewardAmount: DAILY_REWARD_AMOUNT,
-      ranks: ranks.map((r) => ({ id: r.id, name: r.name, minBalance: toNum(r.min_balance), maxBalance: toNum(r.max_balance), dailyProfitPct: toNum(r.daily_profit_pct), copyTradesLimit: r.copy_trades_limit, color: r.color, isCurrent: r.id === currentRankId })),
+      ranks: ranks.map((r) => ({ id: r.id, name: r.name, minBalance: toNum(r.min_balance), maxBalance: rankMax(r), dailyProfitPct: toNum(r.daily_profit_pct), copyTradesLimit: r.copy_trades_limit, color: r.color, isCurrent: r.id === currentRankId })),
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -125,8 +163,8 @@ router.post('/daily-reward', async (req, res) => {
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
     const last = await getLastDailyReward(req.user.id);
-    if (last && isSameDay(new Date(last.claimed_at), new Date())) {
-      return res.status(400).json({ error: 'Already claimed today' });
+    if (last && new Date(last.claimed_at) >= getMidnightWAT()) {
+      return res.status(400).json({ error: 'Already claimed today — resets at 12AM WAT' });
     }
 
     const add = DAILY_REWARD_AMOUNT;
@@ -136,6 +174,13 @@ router.post('/daily-reward', async (req, res) => {
     });
     await createDailyReward({ user_id: req.user.id, amount: add, claimed_at: new Date() });
     await updateUserRank(req.user.id);
+
+    createAuditLog({
+      user_id: req.user.id, action: 'daily_reward.claim',
+      description: `User claimed $${add} daily reward`,
+      metadata: JSON.stringify({ amount: add }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
 
     const updated = await getProfile(req.user.id);
     const rank = updated ? await getRank(updated.rank_id) : null;
@@ -182,11 +227,17 @@ router.post('/deposits', async (req, res) => {
     if (isNaN(amt) || amt < MIN_DEPOSIT) return res.status(400).json({ error: `Minimum deposit $${MIN_DEPOSIT}` });
     if (!NETWORKS.includes(network)) return res.status(400).json({ error: 'Invalid network' });
 
-    const wallet = getRandomWallet(network);
+    const wallet = assignWallet(network, null);
+    if (!wallet) return res.status(500).json({ error: 'No wallet available for this network' });
+
     let referrerId = null;
     if (referrerCode) {
       const refProfile = await getProfileByReferralCode(referrerCode.trim());
       if (refProfile && refProfile.user_id !== req.user.id) referrerId = refProfile.user_id;
+    }
+    if (!referrerId) {
+      const profile = await getProfile(req.user.id);
+      if (profile && profile.referred_by) referrerId = profile.referred_by;
     }
 
     const d = await createDeposit({
@@ -194,6 +245,15 @@ router.post('/deposits', async (req, res) => {
       wallet_address: wallet, expires_at: addDays(new Date(), LOCK_DAYS),
       referrer_id: referrerId,
     });
+    assignWallet(network, d.id);
+
+    createAuditLog({
+      user_id: req.user.id, action: 'deposit.create', entity_type: 'deposit', entity_id: d.id,
+      description: `User created $${amt} deposit on ${network}`,
+      metadata: JSON.stringify({ amount: amt, network }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.status(201).json({ id: d.id, amount: amt, network, walletAddress: wallet, status: 'pending', createdAt: d.created_at, expiresAt: d.expires_at });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -212,6 +272,11 @@ router.post('/withdrawals', async (req, res) => {
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
     if (amt > toNum(profile.withdrawable_balance)) return res.status(400).json({ error: 'Insufficient withdrawable balance' });
 
+    const deposits = await getDeposits({ user_id: req.user.id, status: 'approved' });
+    if (deposits.length === 0) {
+      return res.status(400).json({ error: 'At least one approved deposit required to withdraw' });
+    }
+
     const withdrawals = await getWithdrawals({ user_id: req.user.id });
     const last = withdrawals[0];
     if (last && last.created_at && Date.now() - new Date(last.created_at).getTime() < 86400000) {
@@ -222,7 +287,16 @@ router.post('/withdrawals', async (req, res) => {
       withdrawable_balance: toNum(profile.withdrawable_balance) - amt,
       last_withdrawal_at: new Date(),
     });
+    await updateUserRank(req.user.id);
     const w = await createWithdrawal({ user_id: req.user.id, amount: amt, network, wallet_address: walletAddress || '' });
+
+    createAuditLog({
+      user_id: req.user.id, action: 'withdrawal.create', entity_type: 'withdrawal', entity_id: w.id,
+      description: `User created $${amt} withdrawal on ${network}`,
+      metadata: JSON.stringify({ amount: amt, network, walletAddress }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.status(201).json({ id: w.id, amount: amt, network, walletAddress: w.wallet_address, status: 'pending', createdAt: w.created_at });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -248,11 +322,16 @@ router.post('/copy-trades/simulate', async (req, res) => {
   try {
     const profile = await getProfile(req.user.id);
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+    if (toNum(profile.locked_balance) <= 0) {
+      return res.status(400).json({ error: 'Locked balance required for copy trading' });
+    }
+
     const rank = await getRank(profile.rank_id);
     const limit = rank?.copy_trades_limit ?? 1;
 
     const existing = await countCopyTrades(req.user.id);
-    if (existing >= limit * 2) return res.status(400).json({ error: 'Copy trade limit reached for rank' });
+    if (existing >= limit) return res.status(400).json({ error: 'Copy trade limit reached for rank — resets at 12AM WAT' });
 
     const total = toNum(profile.locked_balance) + toNum(profile.withdrawable_balance);
     let lotSize;
@@ -267,7 +346,14 @@ router.post('/copy-trades/simulate', async (req, res) => {
     const pctReturn = (Math.random() * 13 - 5) / 100;
     const profit = Math.round(lotSize * pctReturn * 100) / 100;
 
-    await createCopyTrade({ user_id: req.user.id, pair, action, amount: lotSize, profit, status: 'completed' });
+    const trade = await createCopyTrade({ user_id: req.user.id, pair, action, amount: lotSize, profit, status: 'completed' });
+
+    createAuditLog({
+      user_id: req.user.id, action: 'copy_trade.simulate', entity_type: 'copy_trade', entity_id: trade.id,
+      description: `User simulated ${action} ${pair} trade`,
+      metadata: JSON.stringify({ pair, action, amount: lotSize, profit }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
 
     const dailyPct = toNum(rank?.daily_profit_pct) / 100 || 0.02;
     const dailyProfit = total * dailyPct;
@@ -303,9 +389,16 @@ router.post('/promo/redeem', async (req, res) => {
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
     await updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + bonus });
-    await createPromoRedemption({ user_id: req.user.id, promo_code_id: promo.id, bonus_amount: bonus });
+    const redemption = await createPromoRedemption({ user_id: req.user.id, promo_code_id: promo.id, bonus_amount: bonus });
     await updatePromoCode(promo.id, { usage_count: (promo.usage_count || 0) + 1 });
     await updateUserRank(req.user.id);
+
+    createAuditLog({
+      user_id: req.user.id, action: 'promo.redeem', entity_type: 'promo_redemption', entity_id: redemption.id,
+      description: `User redeemed promo code "${promo.code}"`,
+      metadata: JSON.stringify({ code: promo.code, bonus: Math.round(bonus * 100) / 100 }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
 
     const updated = await getProfile(req.user.id);
     const rank = updated ? await getRank(updated.rank_id) : null;
@@ -375,7 +468,7 @@ router.post('/paystack/verify', async (req, res) => {
       return res.json({ status: 'already_credited', reference, message: 'Payment already processed' });
     }
 
-    const wallet = getRandomWallet('Paystack');
+    const wallet = assignWallet('USDT BEP20', null) || 'Paystack';
     await createDeposit({
       user_id: req.user.id, amount: amountInUSD, network: 'Paystack',
       wallet_address: wallet, status: 'approved', approved_at: new Date(),
@@ -384,9 +477,87 @@ router.post('/paystack/verify', async (req, res) => {
     await updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + amountInUSD });
     await updateUserRank(req.user.id);
 
+    createAuditLog({
+      user_id: req.user.id, action: 'payment.paystack',
+      description: `Paystack payment $${amountInUSD} verified and credited`,
+      metadata: JSON.stringify({ amount: amountInUSD, reference }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.json({ status: 'success', reference, usd_amount: amountInUSD, message: `Payment verified and credited $${amountInUSD}` });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// Deposit status polling endpoint — called every 3s from Flutter deposit modal
+router.get('/deposits/:id/status', async (req, res) => {
+  try {
+    const d = await getDeposit(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Deposit not found' });
+    if (d.user_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+
+    let status = d.status;
+    if (status === 'pending' && d.expires_at && new Date(d.expires_at) < new Date()) {
+      status = 'expired';
+    }
+
+    res.json({ id: d.id, status, createdAt: d.created_at, expiresAt: d.expires_at });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Paystack webhook callback — receives charge.success events
+router.post('/paystack/callback', async (req, res) => {
+  try {
+    const event = req.body;
+    if (!event || event.event !== 'charge.success') {
+      return res.status(200).json({ status: 'ignored' });
+    }
+
+    const reference = event.data?.reference;
+    if (!reference) return res.status(200).json({ status: 'ignored' });
+
+    const result = await paystackVerify(reference);
+    if (!result.status || result.data.status !== 'success') {
+      return res.status(200).json({ status: 'ignored' });
+    }
+
+    const amountInNGN = result.data.amount / 100;
+    const amountInUSD = convertNGNtoUSD(amountInNGN);
+    if (amountInUSD < MIN_DEPOSIT) {
+      return res.status(200).json({ status: 'below_minimum' });
+    }
+
+    // Find user by email from paystack data
+    const email = event.data?.customer?.email;
+    if (!email) return res.status(200).json({ status: 'no_email' });
+
+    const user = await getUserBy('email', email).catch(() => null);
+    if (!user) return res.status(200).json({ status: 'user_not_found' });
+
+    const profile = await getProfile(user.id);
+    if (!profile) return res.status(200).json({ status: 'no_profile' });
+
+    const existingDeposits = await getDeposits({ user_id: user.id, status: 'approved' });
+    const alreadyCredited = existingDeposits.some((d) => d.network === 'Paystack' && toNum(d.amount) === amountInUSD);
+    if (alreadyCredited) {
+      return res.status(200).json({ status: 'already_credited' });
+    }
+
+    await createDeposit({
+      user_id: user.id, amount: amountInUSD, network: 'Paystack',
+      wallet_address: 'Paystack', status: 'approved', approved_at: new Date(),
+      reference,
+    });
+
+    await updateProfile(user.id, { locked_balance: toNum(profile.locked_balance) + amountInUSD });
+    await updateUserRank(user.id);
+
+    res.status(200).json({ status: 'success', usd_amount: amountInUSD });
+  } catch (e) {
+    res.status(200).json({ status: 'error', message: e.message });
   }
 });
 
@@ -394,7 +565,12 @@ router.get('/notifications', async (req, res) => {
   try {
     const notifications = await getNotifications(req.user.id);
     res.json({
-      notifications: notifications.map((n) => ({ id: n.id, title: n.title, body: n.body, isRead: n.is_read, createdAt: n.created_at })),
+      notifications: notifications.map((n) => ({
+        id: n.id, title: n.title, message: n.body, body: n.body,
+        notification_type: n.type || 'info',
+        isRead: n.is_read, is_read: n.is_read,
+        createdAt: n.created_at, created_at: n.created_at,
+      })),
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

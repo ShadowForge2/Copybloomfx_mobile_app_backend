@@ -1,16 +1,18 @@
 import { Router } from 'express';
 import {
-  db, getUser, getProfile, getRank, getAllRanks,
+  getUser, getProfile, getRank, getAllRanks,
   updateProfile, updateUser,
   getDeposit, updateDeposit, getDeposits,
   getWithdrawal, updateWithdrawal, getWithdrawals,
   getPromoCode, getPromoCodeByCode, getAllPromoCodes, createPromoCode, updatePromoCode,
   getAllRedemptions,
   countUsers, sumDeposits, sumWithdrawals,
-  getProfileByReferralCode, getUsersForAdmin,
-} from '../config/supabase.js';
+  getProfileByReferralCode, getUsersForAdmin, getUserBy, getUsers,
+  createNotification, createAuditLog, createTransaction, getTransactions, createReferral,
+} from '../config/data.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import { toNum, addDays } from '../utils/helpers.js';
+import { releaseAssignment } from '../utils/wallets.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -18,6 +20,10 @@ router.use(adminOnly);
 
 const REFERRAL_PCT = 0.08;
 const LOCK_DAYS = 30;
+
+function rankMax(r) {
+  return r.max_balance !== null && r.max_balance !== undefined ? toNum(r.max_balance) : 999999;
+}
 
 function profileToJson(p, rank) {
   return {
@@ -28,7 +34,7 @@ function profileToJson(p, rank) {
     totalReferrals: p?.total_referrals ?? 0,
     validReferrals: p?.valid_referrals ?? 0,
     referralEarnings: toNum(p?.referral_earnings),
-    rank: rank ? { id: rank.id, name: rank.name, color: rank.color, copyTradesLimit: rank.copy_trades_limit } : null,
+    rank: rank ? { id: rank.id, name: rank.name, maxBalance: rankMax(rank), color: rank.color, copyTradesLimit: rank.copy_trades_limit } : null,
   };
 }
 
@@ -36,36 +42,47 @@ async function updateUserRank(userId) {
   const profile = await getProfile(userId);
   if (!profile) return null;
   const total = toNum(profile.locked_balance) + toNum(profile.withdrawable_balance);
+  if (total <= 0) {
+    if (profile.rank_id !== null) await updateProfile(userId, { rank_id: null });
+    return null;
+  }
   const ranks = await getAllRanks();
-  let newRankId = profile.rank_id;
+  let newRankId = null;
   for (const r of ranks) {
-    if (total >= toNum(r.min_balance) && total <= toNum(r.max_balance)) { newRankId = r.id; break; }
-    if (total >= toNum(r.min_balance)) newRankId = r.id;
+    if (total >= toNum(r.min_balance)) {
+      if (r.max_balance === null || total <= toNum(r.max_balance)) {
+        newRankId = r.id;
+        break;
+      }
+    }
   }
   if (newRankId !== profile.rank_id) await updateProfile(userId, { rank_id: newRankId });
-  return getRank(newRankId);
+  return newRankId ? getRank(newRankId) : null;
 }
 
 // ============ DASHBOARD ============
 
 router.get('/dashboard', async (req, res) => {
   try {
-    const [totalUsers, totalDeposits, totalWithdrawals, pendingDeposits, pendingWithdrawals] = await Promise.all([
+    const [totalUsers, totalDepositAmount, totalWithdrawalAmount, pendingDeps, pendingWiths] = await Promise.all([
       countUsers(),
       sumDeposits({ status: 'approved' }),
       sumWithdrawals({ status: 'approved' }),
-      countUsers(), // placeholder - real pending deposit count below
-      countUsers(), // placeholder
+      getDeposits({ status: 'pending' }),
+      getWithdrawals({ status: 'pending' }),
     ]);
 
-    // actual pending counts
-    const pendingDeps = await getDeposits({ status: 'pending' });
-    const pendingWiths = await getWithdrawals({ status: 'pending' });
+    const flagged = await countUsers({ is_flagged: true });
+    const banned = await countUsers({ is_banned: true });
 
     res.json({
-      totalUsers, totalDeposits, totalWithdrawals,
+      totalUsers,
+      totalDepositAmount,
+      totalWithdrawalAmount,
       pendingDeposits: pendingDeps.length,
       pendingWithdrawals: pendingWiths.length,
+      flaggedUsers: flagged,
+      bannedUsers: banned,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -103,6 +120,19 @@ router.post('/deposits/:id/approve', async (req, res) => {
     if (!d) return res.status(404).json({ error: 'Deposit not found' });
     if (d.status !== 'pending') return res.status(400).json({ error: 'Deposit not pending' });
 
+    if (d.expires_at && new Date(d.expires_at) < new Date()) {
+      await updateDeposit(d.id, { status: 'expired' });
+      releaseAssignment(d.id);
+      createAuditLog({
+        user_id: req.user.id, target_user_id: d.user_id, action: 'deposit.auto_expire',
+        entity_type: 'deposit', entity_id: d.id,
+        description: `Deposit expired — ${d.expires_at}`,
+        metadata: JSON.stringify({ amount: toNum(d.amount) }),
+        ip_address: req.ip || req.connection.remoteAddress || '',
+      }).catch(() => {});
+      return res.status(400).json({ error: 'Deposit has expired' });
+    }
+
     const user = await getUser(d.user_id).catch(() => null);
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (user.is_banned) return res.status(400).json({ error: 'User is banned' });
@@ -112,8 +142,9 @@ router.post('/deposits/:id/approve', async (req, res) => {
 
     const amt = toNum(d.amount);
     await updateProfile(d.user_id, { locked_balance: toNum(profile.locked_balance) + amt });
-    const expiresAt = d.expires_at || addDays(new Date(), LOCK_DAYS);
+    const expiresAt = addDays(new Date(), LOCK_DAYS);
     await updateDeposit(d.id, { status: 'approved', approved_at: new Date(), expires_at: expiresAt });
+    releaseAssignment(d.id);
 
     if (d.referrer_id && d.referrer_id !== d.user_id) {
       const bonus = amt * REFERRAL_PCT;
@@ -125,14 +156,22 @@ router.post('/deposits/:id/approve', async (req, res) => {
           valid_referrals: (refProfile.valid_referrals || 0) + 1,
           referral_earnings: toNum(refProfile.referral_earnings) + bonus,
         });
-        await db.from('referrals').insert({
+        await createReferral({
           referrer_id: d.referrer_id, referee_id: d.user_id,
           bonus_amount: bonus, deposit_id: d.id,
-        }).then();
+        });
       }
     }
     await updateUserRank(d.user_id);
     if (d.referrer_id) await updateUserRank(d.referrer_id);
+
+    createAuditLog({
+      user_id: req.user.id, target_user_id: d.user_id, action: 'deposit.approve',
+      entity_type: 'deposit', entity_id: d.id,
+      description: `Admin approved $${amt} deposit for user`,
+      metadata: JSON.stringify({ amount: amt, userId: d.user_id }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
 
     res.json({ ok: true, deposit: { id: d.id, status: 'approved' } });
   } catch (e) {
@@ -146,6 +185,16 @@ router.post('/deposits/:id/reject', async (req, res) => {
     if (!d) return res.status(404).json({ error: 'Deposit not found' });
     if (d.status !== 'pending') return res.status(400).json({ error: 'Deposit not pending' });
     await updateDeposit(d.id, { status: 'rejected' });
+    releaseAssignment(d.id);
+
+    createAuditLog({
+      user_id: req.user.id, target_user_id: d.user_id, action: 'deposit.reject',
+      entity_type: 'deposit', entity_id: d.id,
+      description: `Admin rejected $${toNum(d.amount)} deposit for user`,
+      metadata: JSON.stringify({ amount: toNum(d.amount), userId: d.user_id }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.json({ ok: true, deposit: { id: d.id, status: 'rejected' } });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -189,6 +238,15 @@ router.post('/withdrawals/:id/approve', async (req, res) => {
     if (user.is_flagged) return res.status(400).json({ error: 'User is flagged' });
 
     await updateWithdrawal(w.id, { status: 'approved', processed_at: new Date() });
+
+    createAuditLog({
+      user_id: req.user.id, target_user_id: w.user_id, action: 'withdrawal.approve',
+      entity_type: 'withdrawal', entity_id: w.id,
+      description: `Admin approved $${toNum(w.amount)} withdrawal for user`,
+      metadata: JSON.stringify({ amount: toNum(w.amount), userId: w.user_id }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.json({ ok: true, withdrawal: { id: w.id, status: 'approved' } });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -206,6 +264,15 @@ router.post('/withdrawals/:id/reject', async (req, res) => {
       await updateProfile(w.user_id, { withdrawable_balance: toNum(profile.withdrawable_balance) + toNum(w.amount) });
     }
     await updateWithdrawal(w.id, { status: 'rejected', processed_at: new Date() });
+
+    createAuditLog({
+      user_id: req.user.id, target_user_id: w.user_id, action: 'withdrawal.reject',
+      entity_type: 'withdrawal', entity_id: w.id,
+      description: `Admin rejected $${toNum(w.amount)} withdrawal for user (refunded)`,
+      metadata: JSON.stringify({ amount: toNum(w.amount), userId: w.user_id, refunded: true }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.json({ ok: true, withdrawal: { id: w.id, status: 'rejected' } });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -223,7 +290,7 @@ router.get('/promos', async (req, res) => {
       let user = null;
       let promo = null;
       try { user = await getUser(r.user_id); } catch (_) {}
-      try { promo = await db.from('promo_codes').select('code').eq('id', r.promo_code_id).single().then(d => d.data); } catch (_) {}
+      try { promo = await getPromoCode(r.promo_code_id).then(p => p ? { code: p.code } : null); } catch (_) {}
       return {
         id: r.id, userId: r.user_id, username: user?.username,
         code: promo?.code, bonusAmount: toNum(r.bonus_amount), createdAt: r.created_at,
@@ -257,6 +324,13 @@ router.post('/promos', async (req, res) => {
       usage_limit: usageLimit != null ? parseInt(usageLimit, 10) : null,
       status: 'active',
     });
+    createAuditLog({
+      user_id: req.user.id, action: 'promo.create', entity_type: 'promo_code', entity_id: p.id,
+      description: `Admin created promo code "${p.code}"`,
+      metadata: JSON.stringify({ code: p.code, bonusMin: p.bonus_min, bonusMax: p.bonus_max }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.status(201).json({
       id: p.id, code: p.code, bonusMin: toNum(p.bonus_min), bonusMax: toNum(p.bonus_max),
       expiration: p.expiration, usageLimit: p.usage_limit, status: p.status,
@@ -273,6 +347,16 @@ router.patch('/promos/:id', async (req, res) => {
     const { isActive } = req.body;
     const newStatus = isActive === true ? 'active' : (isActive === false ? 'disabled' : promo.status);
     if (newStatus !== promo.status) await updatePromoCode(promo.id, { status: newStatus });
+
+    if (newStatus !== promo.status) {
+      createAuditLog({
+        user_id: req.user.id, action: 'promo.toggle', entity_type: 'promo_code', entity_id: promo.id,
+        description: `Admin ${newStatus === 'active' ? 'enabled' : 'disabled'} promo code "${promo.code}"`,
+        metadata: JSON.stringify({ code: promo.code, status: newStatus }),
+        ip_address: req.ip || req.connection.remoteAddress || '',
+      }).catch(() => {});
+    }
+
     res.json({ id: promo.id, status: newStatus });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -334,6 +418,16 @@ router.post('/users/:id/flag', async (req, res) => {
     if (!u) return res.status(404).json({ error: 'User not found' });
     if (u.role === 'admin') return res.status(403).json({ error: 'Cannot flag admin' });
     await updateUser(u.id, { is_flagged: true });
+    await createNotification(u.id, 'Account Flagged', 'Your account has been flagged for review. If you believe this is an error, please contact support.', 'warning');
+
+    createAuditLog({
+      user_id: req.user.id, target_user_id: u.id, action: 'user.flag',
+      entity_type: 'user', entity_id: u.id,
+      description: `Admin flagged user "${u.username}"`,
+      metadata: JSON.stringify({ targetUserId: u.id, targetUsername: u.username }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.json({ ok: true, user: { id: u.id, isFlagged: true } });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -345,6 +439,16 @@ router.post('/users/:id/unflag', async (req, res) => {
     const u = await getUser(req.params.id).catch(() => null);
     if (!u) return res.status(404).json({ error: 'User not found' });
     await updateUser(u.id, { is_flagged: false });
+    await createNotification(u.id, 'Flag Removed', 'The flag on your account has been removed. You may continue using all platform features.', 'success');
+
+    createAuditLog({
+      user_id: req.user.id, target_user_id: u.id, action: 'user.unflag',
+      entity_type: 'user', entity_id: u.id,
+      description: `Admin removed flag for user "${u.username}"`,
+      metadata: JSON.stringify({ targetUserId: u.id, targetUsername: u.username }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.json({ ok: true, user: { id: u.id, isFlagged: false } });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -357,6 +461,16 @@ router.post('/users/:id/ban', async (req, res) => {
     if (!u) return res.status(404).json({ error: 'User not found' });
     if (u.role === 'admin') return res.status(403).json({ error: 'Cannot ban admin' });
     await updateUser(u.id, { is_banned: true, is_flagged: true });
+    await createNotification(u.id, 'Account Banned', 'Your account has been suspended for violating our Terms of Service. Please contact support for more information.', 'urgent');
+
+    createAuditLog({
+      user_id: req.user.id, target_user_id: u.id, action: 'user.ban',
+      entity_type: 'user', entity_id: u.id,
+      description: `Admin banned user "${u.username}"`,
+      metadata: JSON.stringify({ targetUserId: u.id, targetUsername: u.username }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.json({ ok: true, user: { id: u.id, isBanned: true } });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -368,6 +482,16 @@ router.post('/users/:id/unban', async (req, res) => {
     const u = await getUser(req.params.id).catch(() => null);
     if (!u) return res.status(404).json({ error: 'User not found' });
     await updateUser(u.id, { is_banned: false });
+    await createNotification(u.id, 'Account Reinstated', 'Your account has been reinstated. You may now log in and use all platform features.', 'success');
+
+    createAuditLog({
+      user_id: req.user.id, target_user_id: u.id, action: 'user.unban',
+      entity_type: 'user', entity_id: u.id,
+      description: `Admin unbanned user "${u.username}"`,
+      metadata: JSON.stringify({ targetUserId: u.id, targetUsername: u.username }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.json({ ok: true, user: { id: u.id, isBanned: false } });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -379,6 +503,16 @@ router.post('/users/:id/suspend', async (req, res) => {
     const u = await getUser(req.params.id).catch(() => null);
     if (!u) return res.status(404).json({ error: 'User not found' });
     await updateUser(u.id, { is_banned: true });
+    await createNotification(u.id, 'Account Suspended', 'Your account has been suspended. Please contact support for further information.', 'urgent');
+
+    createAuditLog({
+      user_id: req.user.id, target_user_id: u.id, action: 'user.suspend',
+      entity_type: 'user', entity_id: u.id,
+      description: `Admin suspended user "${u.username}"`,
+      metadata: JSON.stringify({ targetUserId: u.id, targetUsername: u.username }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.json({ ok: true, user: { id: u.id, isBanned: true } });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -390,6 +524,16 @@ router.post('/users/:id/activate', async (req, res) => {
     const u = await getUser(req.params.id).catch(() => null);
     if (!u) return res.status(404).json({ error: 'User not found' });
     await updateUser(u.id, { is_banned: false, is_flagged: false });
+    await createNotification(u.id, 'Account Activated', 'Your account has been fully activated. All restrictions have been removed.', 'success');
+
+    createAuditLog({
+      user_id: req.user.id, target_user_id: u.id, action: 'user.activate',
+      entity_type: 'user', entity_id: u.id,
+      description: `Admin activated user "${u.username}"`,
+      metadata: JSON.stringify({ targetUserId: u.id, targetUsername: u.username }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
     res.json({ ok: true, user: { id: u.id, isBanned: false, isFlagged: false } });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -403,12 +547,11 @@ router.post('/transactions', async (req, res) => {
     if (!user_id || !type || amount == null) {
       return res.status(400).json({ error: 'user_id, type, and amount required' });
     }
-    const { data, error } = await db.from('transactions').insert({
+    const tx = await createTransaction({
       user_id, type, amount: parseFloat(amount), description,
       status: 'completed', processed_at: new Date(),
-    }).select().single();
-    if (error) return res.status(500).json({ error: error.message });
-    res.status(201).json(data);
+    });
+    res.status(201).json(tx);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -416,10 +559,57 @@ router.post('/transactions', async (req, res) => {
 
 router.get('/users/:id/transactions', async (req, res) => {
   try {
-    const { data, error } = await db.from('transactions').select('*')
-      .eq('user_id', req.params.id).order('created_at', { ascending: false }).limit(50);
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ transactions: data || [] });
+    const data = await getTransactions({ user_id: req.params.id });
+    res.json({ transactions: data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Send notification to users
+router.post('/send-notification', async (req, res) => {
+  try {
+    const { title, message, type, sendType, targetUsers } = req.body;
+    if (!title || !message) return res.status(400).json({ error: 'Title and message are required' });
+
+    const notificationType = type || 'info';
+    let sent = 0;
+    const notFound = [];
+
+    if (sendType === 'targeted') {
+      if (!targetUsers || !targetUsers.length) return res.status(400).json({ error: 'Target users required for targeted send' });
+      for (const target of targetUsers) {
+        const u = await getUserBy('username', target.trim()).catch(() => null)
+                 || await getUserBy('email', target.trim()).catch(() => null);
+        if (u) {
+          await createNotification(u.id, title, message, notificationType);
+          sent++;
+        } else {
+          notFound.push(target.trim());
+        }
+      }
+    } else {
+      // system-wide: send to all active users
+      const users = await getUsers({ is_banned: false }).catch(() => []);
+      for (const u of users) {
+        await createNotification(u.id, title, message, notificationType);
+        sent++;
+      }
+    }
+
+    createAuditLog({
+      user_id: req.user.id, action: 'notification.send',
+      description: `Admin sent notification "${title}" to ${sent} user(s)`,
+      metadata: JSON.stringify({ title, sendType, sentCount: sent, notFound: notFound.length }),
+      ip_address: req.ip || req.connection.remoteAddress || '',
+    }).catch(() => {});
+
+    res.json({
+      ok: true,
+      sent,
+      notFound: notFound.length ? notFound : undefined,
+      message: `Notification sent to ${sent} user(s)${notFound.length ? `. ${notFound.length} not found: ${notFound.join(', ')}` : ''}`,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

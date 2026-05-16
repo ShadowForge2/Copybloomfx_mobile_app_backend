@@ -1,17 +1,17 @@
 -- =============================================
 -- BloomFX Complete Schema for Supabase
+-- Fully synced with SQLite Sequelize models
 -- Run this in Supabase SQL Editor
 -- =============================================
 
--- Enable UUID generation
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- 1. RANKS (standalone, no FK dependencies)
+-- 1. RANKS
 CREATE TABLE IF NOT EXISTS ranks (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   min_balance NUMERIC DEFAULT 0,
-  max_balance NUMERIC DEFAULT 999999,
+  max_balance NUMERIC,
   daily_profit_pct NUMERIC DEFAULT 0,
   copy_trades_limit INTEGER DEFAULT 1,
   color TEXT DEFAULT '#6366f1',
@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS users (
   auth_user_id TEXT UNIQUE,
   username TEXT UNIQUE NOT NULL,
   email TEXT,
+  password_hash TEXT,
   role TEXT DEFAULT 'user' CHECK (role IN ('user', 'admin')),
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'inactive')),
   is_flagged BOOLEAN DEFAULT FALSE,
@@ -32,15 +33,17 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. PROFILES (depends on users, ranks)
+-- 3. PROFILES
 CREATE TABLE IF NOT EXISTS profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   first_name TEXT,
   last_name TEXT,
   phone TEXT,
+  email TEXT,
   country TEXT,
   referral_code TEXT UNIQUE,
+  referred_by TEXT,
   total_referrals INTEGER DEFAULT 0,
   valid_referrals INTEGER DEFAULT 0,
   referral_earnings NUMERIC DEFAULT 0,
@@ -54,14 +57,14 @@ CREATE TABLE IF NOT EXISTS profiles (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. DEPOSITS (depends on users)
+-- 4. DEPOSITS
 CREATE TABLE IF NOT EXISTS deposits (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   amount NUMERIC NOT NULL,
   network TEXT,
   wallet_address TEXT,
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
   reference TEXT,
   referrer_id UUID,
   expires_at TIMESTAMPTZ,
@@ -69,7 +72,7 @@ CREATE TABLE IF NOT EXISTS deposits (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. WITHDRAWALS (depends on users)
+-- 5. WITHDRAWALS
 CREATE TABLE IF NOT EXISTS withdrawals (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -81,7 +84,7 @@ CREATE TABLE IF NOT EXISTS withdrawals (
   processed_at TIMESTAMPTZ
 );
 
--- 6. COPY_TRADES (depends on users)
+-- 6. COPY_TRADES
 CREATE TABLE IF NOT EXISTS copy_trades (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -93,7 +96,7 @@ CREATE TABLE IF NOT EXISTS copy_trades (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 7. DAILY_REWARDS (depends on users)
+-- 7. DAILY_REWARDS
 CREATE TABLE IF NOT EXISTS daily_rewards (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -101,7 +104,7 @@ CREATE TABLE IF NOT EXISTS daily_rewards (
   claimed_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 8. REFERRALS (depends on users)
+-- 8. REFERRALS
 CREATE TABLE IF NOT EXISTS referrals (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   referrer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -111,7 +114,7 @@ CREATE TABLE IF NOT EXISTS referrals (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 9. PROMO_CODES (standalone)
+-- 9. PROMO_CODES
 CREATE TABLE IF NOT EXISTS promo_codes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   code TEXT UNIQUE NOT NULL,
@@ -124,7 +127,7 @@ CREATE TABLE IF NOT EXISTS promo_codes (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 10. PROMO_REDEMPTIONS (depends on users, promo_codes)
+-- 10. PROMO_REDEMPTIONS
 CREATE TABLE IF NOT EXISTS promo_redemptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -133,17 +136,18 @@ CREATE TABLE IF NOT EXISTS promo_redemptions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 11. NOTIFICATIONS (depends on users)
+-- 11. NOTIFICATIONS
 CREATE TABLE IF NOT EXISTS notifications (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title TEXT,
   body TEXT,
+  type TEXT DEFAULT 'info',
   is_read BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 12. TRANSACTIONS (depends on users)
+-- 12. TRANSACTIONS
 CREATE TABLE IF NOT EXISTS transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -154,6 +158,32 @@ CREATE TABLE IF NOT EXISTS transactions (
   reference TEXT,
   processed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 13. AUDIT_LOGS
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT,
+  target_user_id TEXT,
+  action TEXT NOT NULL,
+  entity_type TEXT,
+  entity_id TEXT,
+  description TEXT,
+  metadata TEXT,
+  ip_address TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 14. SESSIONS
+CREATE TABLE IF NOT EXISTS sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  ip_address TEXT,
+  user_agent TEXT,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  last_accessed_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- =============================================
@@ -194,6 +224,14 @@ CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);
 
 CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
 
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+
 -- =============================================
 -- RPC FUNCTION: sum_daily_rewards
 -- =============================================
@@ -206,20 +244,26 @@ AS $$
 $$;
 
 -- =============================================
--- SEED DATA: ranks
+-- SEED DATA: ranks (synced with SQLite RANK_SEED)
 -- =============================================
 INSERT INTO ranks (name, min_balance, max_balance, daily_profit_pct, copy_trades_limit, color) VALUES
-  ('Starter',   0,      99,    0.5,  1, '#94a3b8'),
-  ('Bronze',    100,    499,   0.8,  2, '#cd7f32'),
-  ('Silver',    500,    1999,  1.0,  3, '#c0c0c0'),
-  ('Gold',      2000,   4999,  1.5,  5, '#ffd700'),
-  ('Platinum',  5000,   9999,  2.0,  8, '#e5e4e2'),
-  ('Diamond',   10000,  49999, 3.0,  12, '#b9f2ff'),
-  ('Elite',     50000,  999999999, 5.0, 20, '#ff6b6b')
+  ('Green Horn',      7,     49,    1.67, 1, '#4CAF50'),
+  ('Student Form',    50,    100,   2.0,  2, '#2196F3'),
+  ('Market Maven',    100,   500,   2.0,  3, '#9C27B0'),
+  ('Gunslinger',      500,   1500,  2.2,  4, '#FF9800'),
+  ('Whale',           1500,  5000,  2.5,  5, '#FFC107'),
+  ('Market Wizard',   5000,  NULL,  2.7,  6, '#FFD700')
 ON CONFLICT DO NOTHING;
 
 -- =============================================
--- DISABLE RLS on all tables (service_role bypasses anyway)
+-- SEED DATA: admin user
+-- =============================================
+INSERT INTO users (id, username, email, role, status) VALUES
+  ('00000000-0000-0000-0000-000000000000', 'admin', 'bashirabdulganiyy9@gmail.com', 'admin', 'active')
+ON CONFLICT (id) DO NOTHING;
+
+-- =============================================
+-- DISABLE RLS (service_role bypasses anyway)
 -- =============================================
 ALTER TABLE users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;
@@ -233,3 +277,5 @@ ALTER TABLE promo_codes DISABLE ROW LEVEL SECURITY;
 ALTER TABLE promo_redemptions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications DISABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE sessions DISABLE ROW LEVEL SECURITY;

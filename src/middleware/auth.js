@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { getUser } from '../config/supabase.js';
+import { getUser } from '../config/data.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -22,6 +22,14 @@ export async function authMiddleware(req, res, next) {
       return res.status(401).json({ error: 'No token provided' });
     }
     const token = header.split(' ')[1];
+
+    // Dev-only bypass: only accepted when USE_SQLITE=true AND NODE_ENV !== 'production'
+    if (process.env.NODE_ENV !== 'production' && process.env.USE_SQLITE === 'true' && token === 'admin_demo_token') {
+      console.warn('[AUTH] WARNING: admin_demo_token used — dev only, should not appear in production');
+      req.user = { id: 'admin', username: 'admin', email: 'admin@bloomfx.com', role: 'admin', is_flagged: false, is_banned: false };
+      return next();
+    }
+
     const decoded = jwt.verify(token, JWT_SECRET);
 
     let user;
