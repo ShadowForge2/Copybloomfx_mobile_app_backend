@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { getUser, getUserBy, updateUser, getProfile, createUser, createProfile, getRank, getUsers, createNotification, createAuditLog, createSession, getProfileByReferralCode } from '../config/data.js';
+import { getUser, getUserBy, updateUser, getProfile, createUser, createProfile, getRank, getAllRanks, getUsers, createNotification, createAuditLog, createSession, getProfileByReferralCode } from '../config/data.js';
 import bcrypt from 'bcryptjs';
 import { signToken, authMiddleware, adminOnly } from '../middleware/auth.js';
 import { generateReferralCode } from '../utils/referral.js';
@@ -89,9 +89,11 @@ router.post('/signup', async (req, res) => {
       if (refProfile && refProfile.user_id !== user.id) referredBy = refProfile.user_id;
     }
 
+    const ranks = await getAllRanks();
+    const defaultRankId = ranks.length > 0 ? ranks[0].id : null;
     const profile = await createProfile({
       user_id: user.id,
-      rank_id: 1,
+      rank_id: defaultRankId,
       referral_code: refCode,
       referred_by: referredBy,
     });
@@ -206,9 +208,11 @@ router.post('/login', async (req, res) => {
       let refCode = generateReferralCode();
       const existingRef = await getProfile(refCode).catch(() => null);
       if (existingRef) refCode = generateReferralCode();
+      const loginRanks = await getAllRanks().then(r => r || []);
+      const loginDefaultRankId = loginRanks.length > 0 ? loginRanks[0].id : null;
       profile = await createProfile({
         user_id: user.id,
-        rank_id: 1,
+        rank_id: loginDefaultRankId,
         referral_code: refCode,
       });
     }
