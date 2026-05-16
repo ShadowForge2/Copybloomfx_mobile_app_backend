@@ -101,6 +101,8 @@ router.post('/signup', async (req, res) => {
     const rank = await getRank(profile.rank_id);
     await autoFlagSameIp(clientIp, user.id);
 
+    createNotification(user.id, 'Account Created', 'Welcome to SmartBoomFX! Your account has been successfully set up. Deposit a minimum of $7 and start earning by copying successful traders. Automatically earn profit every day.', 'success').catch(() => {});
+
     const token = signToken(user);
 
     createAuditLog({
