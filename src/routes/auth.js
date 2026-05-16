@@ -44,8 +44,8 @@ function profileResponse(p, rank) {
 
 router.post('/signup', async (req, res) => {
   try {
-    const { username, email, password, referrerCode } = req.body;
-    console.log('[SIGNUP REQ]', JSON.stringify({ username, hasEmail: !!email, hasPassword: !!password }));
+    const { username, email, password, referrerCode, firstName, lastName } = req.body;
+    console.log('[SIGNUP REQ]', JSON.stringify({ username, hasEmail: !!email, hasPassword: !!password, firstName, lastName }));
     if (!username || !password) {
       console.log('[SIGNUP FAIL] missing_fields');
       return res.status(400).json({ error: 'Username and password required' });
@@ -96,6 +96,8 @@ router.post('/signup', async (req, res) => {
       rank_id: defaultRankId,
       referral_code: refCode,
       referred_by: referredBy,
+      first_name: firstName || null,
+      last_name: lastName || null,
     });
 
     const rank = await getRank(profile.rank_id);
