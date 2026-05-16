@@ -480,7 +480,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
       }
     } catch (e) {
-      _errorMessage = 'Failed to load dashboard: $e';
+      _errorMessage = 'Failed to load dashboard. Please try again.';
       if (_data == null) {
         _data = _buildLocalDashboard(_userId ?? userId);
         _data = _reconcileRanks(_data!);
@@ -536,7 +536,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
       }
     } catch (e) {
-      _errorMessage = 'Finance load failed: $e';
+      _errorMessage = 'Failed to load finance data. Please try again.';
     }
     notifyListeners();
   }
@@ -781,7 +781,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
         await fetchFinance();
         return true;
       } catch (e) {
-        _errorMessage = 'Dev approve failed: $e';
+        _errorMessage = 'Operation failed. Please try again.';
         notifyListeners();
         return false;
       }
@@ -814,7 +814,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
         await fetchFinance();
         return true;
       } catch (e) {
-        _errorMessage = 'Dev reject failed: $e';
+        _errorMessage = 'Operation failed. Please try again.';
         notifyListeners();
         return false;
       }
@@ -847,7 +847,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
         await fetchFinance();
         return true;
       } catch (e) {
-        _errorMessage = 'Dev approve withdrawal failed: $e';
+        _errorMessage = 'Operation failed. Please try again.';
         notifyListeners();
         return false;
       }
@@ -882,7 +882,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
         await fetchFinance();
         return true;
       } catch (e) {
-        _errorMessage = 'Dev reject withdrawal failed: $e';
+        _errorMessage = 'Operation failed. Please try again.';
         notifyListeners();
         return false;
       }
@@ -973,7 +973,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       return false;
     } catch (e) {
-      _errorMessage = 'Failed to claim daily reward: $e';
+      _errorMessage = 'Failed to claim daily reward. Please try again.';
       notifyListeners();
       return false;
     }
@@ -1025,7 +1025,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       return false;
     } catch (e) {
-      _errorMessage = 'Failed to claim rank profit: $e';
+      _errorMessage = 'Failed to claim rank profit. Please try again.';
       notifyListeners();
       return false;
     }
@@ -1144,7 +1144,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       return newTrade;
     } catch (e) {
-      _errorMessage = 'Failed to place copy trade: $e';
+      _errorMessage = 'Failed to place copy trade. Please try again.';
       _isSimulating = false;
       notifyListeners();
       return null;
@@ -1240,7 +1240,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       return false;
     } catch (e) {
-      _errorMessage = 'Verification failed: $e';
+      _errorMessage = 'Payment verification failed. Please try again.';
       notifyListeners();
       return false;
     }
@@ -1280,7 +1280,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       return false;
     } catch (e) {
-      _errorMessage = 'Failed to redeem promo: $e';
+      _errorMessage = 'Failed to redeem promo. Please try again.';
       notifyListeners();
       return false;
     }
