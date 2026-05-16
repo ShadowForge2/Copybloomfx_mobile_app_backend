@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { db, getUser, getUserBy, updateUser, getProfile, createUser, createProfile, getRank, getUsers, createNotification, createAuditLog, createSession, getProfileByReferralCode } from '../config/data.js';
+import { db, supabase, getUser, getUserBy, updateUser, getProfile, createUser, createProfile, getRank, getUsers, createNotification, createAuditLog, createSession, getProfileByReferralCode } from '../config/data.js';
 import bcrypt from 'bcryptjs';
 import { signToken, authMiddleware, adminOnly } from '../middleware/auth.js';
 import { generateReferralCode } from '../utils/referral.js';
@@ -81,8 +81,8 @@ router.post('/signup', async (req, res) => {
         last_login_ip: clientIp,
       });
     } else {
-      console.log('[SIGNUP] calling db.auth.signUp');
-      const { data: authData, error: authErr } = await db.auth.signUp({
+      console.log('[SIGNUP] calling supabase.auth.signUp');
+      const { data: authData, error: authErr } = await supabase.auth.signUp({
         email: email || `${username}@bloomfx.app`,
         password,
         options: { data: { username: username.trim() } },
