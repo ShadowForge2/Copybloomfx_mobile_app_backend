@@ -65,6 +65,8 @@ function profileToJson(p, rank) {
     validReferrals: p?.valid_referrals ?? 0,
     referralEarnings: toNum(p?.referral_earnings),
     profilePicture: p?.profile_picture || null,
+    lastDailyRewardAt: p?.last_daily_reward_at || null,
+    lastDailyProfitAt: p?.last_daily_profit_at || null,
     rank: rank ? {
       id: rank.id, name: rank.name,
       minBalance: toNum(rank.min_balance), maxBalance: rankMax(rank),
