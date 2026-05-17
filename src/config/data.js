@@ -116,7 +116,8 @@ export async function getRank(id) {
   if (USE_SQLITE) {
     return sq(await RankModel.findByPk(id));
   }
-  const { data, error } = await supabase.from('ranks').select('*').eq('id', id).single();
+  const { data, error } = await supabase.from('ranks').select('*').eq('id', id).maybeSingle();
+  if (error && error.code === 'PGRST116') return null;
   if (error) throw error;
   return data;
 }
