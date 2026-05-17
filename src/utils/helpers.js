@@ -9,6 +9,12 @@ export function addDays(date, days) {
   return d;
 }
 
+export function addMinutes(date, minutes) {
+  const d = new Date(date);
+  d.setMinutes(d.getMinutes() + minutes);
+  return d;
+}
+
 export function isSameDay(d1, d2) {
   if (!d1 || !d2) return false;
   return d1.getFullYear() === d2.getFullYear() &&

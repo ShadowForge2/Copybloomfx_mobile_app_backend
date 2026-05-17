@@ -10,7 +10,13 @@ import {
   getProfileByReferralCode, createReferral, createNotification, createAuditLog,
 } from '../config/data.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { toNum, addDays, isSameDay, getMidnightWAT } from '../utils/helpers.js';
+import { toNum, isSameDay, getMidnightWAT } from '../utils/helpers.js';
+import {
+  walletAssignmentExpiresAt,
+  approvedLockExpiresAt,
+  processUserDepositsExpiry,
+  resolveReferrerUserId,
+} from '../services/depositExpiry.js';
 import { NETWORKS, assignWallet, getAssignment, releaseAssignment } from '../utils/wallets.js';
 import { paystackInit, paystackVerify, convertNGNtoUSD } from '../utils/paystack.js';
 
@@ -20,7 +26,6 @@ router.use(authMiddleware);
 const MIN_DEPOSIT = 7;
 const MIN_WITHDRAWAL = 10;
 const DAILY_REWARD_AMOUNT = 0.1;
-const LOCK_DAYS = 30;
 const REFERRAL_PCT = 0.08;
 const PAIRS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT'];
 
@@ -99,27 +104,13 @@ router.put('/profile', async (req, res) => {
   }
 });
 
-async function expirePendingDeposits(userId, ip) {
-  const pending = await getDeposits({ user_id: userId, status: 'pending' }).catch(() => []);
-  const now = new Date();
-  for (const d of pending) {
-    if (d.expires_at && new Date(d.expires_at) < now) {
-      await updateDeposit(d.id, { status: 'expired' }).catch(() => {});
-      createAuditLog({
-        user_id: userId, action: 'deposit.auto_expire',
-        entity_type: 'deposit', entity_id: d.id,
-        description: `Deposit auto-expired on login/dashboard`,
-        metadata: JSON.stringify({ amount: toNum(d.amount) }),
-        ip_address: ip || '',
-      }).catch(() => {});
-    }
-  }
-}
-
 router.get('/dashboard', async (req, res) => {
   try {
     await updateUserRank(req.user.id);
-    await expirePendingDeposits(req.user.id, req.ip || req.connection.remoteAddress || '');
+    await processUserDepositsExpiry(
+      req.user.id,
+      req.ip || req.connection.remoteAddress || '',
+    );
     const profile = await getProfile(req.user.id);
     const rank = profile ? await getRank(profile.rank_id) : null;
     const limit = rank?.copy_trades_limit ?? 1;
@@ -149,7 +140,11 @@ router.get('/dashboard', async (req, res) => {
       profile: profileToJson(profile, rank),
       copyTrades: trades.map((t) => ({ id: t.id, pair: t.pair, action: t.action, amount: toNum(t.amount), profit: toNum(t.profit), status: t.status, createdAt: t.created_at })),
       copyTradesLimit: limit,
-      pendingDeposits: pendingDepositsList.map((d) => ({ id: d.id, amount: toNum(d.amount), network: d.network, createdAt: d.created_at, expiresAt: d.expires_at })),
+      pendingDeposits: pendingDepositsList.map((d) => ({
+        id: d.id, amount: toNum(d.amount), network: d.network,
+        walletAddress: d.wallet_address, status: d.status,
+        createdAt: d.created_at, expiresAt: d.expires_at,
+      })),
       canClaimDaily, dailyRewardAmount: DAILY_REWARD_AMOUNT,
       ranks: ranks.map((r) => ({ id: r.id, name: r.name, minBalance: toNum(r.min_balance), maxBalance: rankMax(r), dailyProfitPct: toNum(r.daily_profit_pct), copyTradesLimit: r.copy_trades_limit, color: r.color, isCurrent: r.id === currentRankId })),
     });
@@ -193,6 +188,10 @@ router.post('/daily-reward', async (req, res) => {
 
 router.get('/finance', async (req, res) => {
   try {
+    await processUserDepositsExpiry(
+      req.user.id,
+      req.ip || req.connection.remoteAddress || '',
+    );
     const profile = await getProfile(req.user.id);
     const rank = profile ? await getRank(profile.rank_id) : null;
 
@@ -241,9 +240,11 @@ router.post('/deposits', async (req, res) => {
       if (profile && profile.referred_by) referrerId = profile.referred_by;
     }
 
+    const createdAt = new Date();
     const d = await createDeposit({
       user_id: req.user.id, amount: amt, network,
-      wallet_address: wallet, expires_at: addDays(new Date(), LOCK_DAYS),
+      wallet_address: wallet,
+      expires_at: null,
       referrer_id: referrerId,
     });
     assignWallet(network, d.id);
@@ -257,7 +258,13 @@ router.post('/deposits', async (req, res) => {
       ip_address: req.ip || req.connection.remoteAddress || '',
     }).catch(() => {});
 
-    res.status(201).json({ id: d.id, amount: amt, network, walletAddress: wallet, status: 'pending', createdAt: d.created_at, expiresAt: d.expires_at });
+    const walletExpiresAt = walletAssignmentExpiresAt(createdAt);
+    res.status(201).json({
+      id: d.id, amount: amt, network, walletAddress: wallet, status: 'pending',
+      createdAt: d.created_at,
+      expiresAt: null,
+      walletExpiresAt,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -292,6 +299,13 @@ router.post('/withdrawals', async (req, res) => {
     });
     await updateUserRank(req.user.id);
     const w = await createWithdrawal({ user_id: req.user.id, amount: amt, network, wallet_address: walletAddress || '' });
+
+    createNotification(
+      req.user.id,
+      'Withdrawal Submitted',
+      `Your withdrawal of $${amt.toFixed(2)} to ${network} is pending admin payout. Funds were reserved from your withdrawable balance.`,
+      'info',
+    ).catch(() => {});
 
     createAuditLog({
       user_id: req.user.id, action: 'withdrawal.create', entity_type: 'withdrawal', entity_id: w.id,
@@ -393,10 +407,11 @@ router.post('/promo/redeem', async (req, res) => {
 
     await updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + bonus });
     const redemption = await createPromoRedemption({ user_id: req.user.id, promo_code_id: promo.id, bonus_amount: bonus });
+    const promoApprovedAt = new Date();
     await createDeposit({
       user_id: req.user.id, amount: bonus, network: 'Promo Bonus',
-      wallet_address: 'Promo', status: 'approved', approved_at: new Date(),
-      expires_at: addDays(new Date(), LOCK_DAYS),
+      wallet_address: 'Promo', status: 'approved', approved_at: promoApprovedAt,
+      expires_at: approvedLockExpiresAt(promoApprovedAt),
     });
     await updatePromoCode(promo.id, { usage_count: (promo.usage_count || 0) + 1 });
     await updateUserRank(req.user.id);
@@ -477,40 +492,40 @@ router.post('/paystack/verify', async (req, res) => {
     }
 
     const wallet = assignWallet('USDT BEP20', null) || 'Paystack';
+    const paystackApprovedAt = new Date();
     const paystackDeposit = await createDeposit({
       user_id: req.user.id, amount: amountInUSD, network: 'Paystack',
-      wallet_address: wallet, status: 'approved', approved_at: new Date(),
-      expires_at: addDays(new Date(), LOCK_DAYS),
+      wallet_address: wallet, status: 'approved', approved_at: paystackApprovedAt,
+      expires_at: approvedLockExpiresAt(paystackApprovedAt),
     });
 
     await updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + amountInUSD });
     await updateUserRank(req.user.id);
 
     // Referral bonus for Paystack deposit
-    if (profile.referred_by) {
-      const referrer = await getUserBy('referral_code', profile.referred_by).catch(() => null);
-      if (referrer && referrer.id !== req.user.id) {
-        const bonus = amountInUSD * REFERRAL_PCT;
-        const refProfile = await getProfile(referrer.id);
-        if (refProfile) {
-          await updateProfile(referrer.id, {
-            locked_balance: toNum(refProfile.locked_balance) + bonus,
-            total_referrals: (refProfile.total_referrals || 0) + 1,
-            valid_referrals: (refProfile.valid_referrals || 0) + 1,
-            referral_earnings: toNum(refProfile.referral_earnings) + bonus,
-          });
-          await createDeposit({
-            user_id: referrer.id, amount: bonus, network: 'Referral Bonus',
-            wallet_address: 'Paystack', status: 'approved', approved_at: new Date(),
-            expires_at: addDays(new Date(), LOCK_DAYS),
-            referrer_id: req.user.id,
-          });
-          await createReferral({
-            referrer_id: referrer.id, referee_id: req.user.id,
-            bonus_amount: bonus, deposit_id: paystackDeposit.id,
-          });
-          await updateUserRank(referrer.id);
-        }
+    const referrerId = await resolveReferrerUserId(profile.referred_by);
+    if (referrerId && referrerId !== req.user.id) {
+      const bonus = amountInUSD * REFERRAL_PCT;
+      const refProfile = await getProfile(referrerId);
+      if (refProfile) {
+        const refApprovedAt = new Date();
+        await updateProfile(referrerId, {
+          locked_balance: toNum(refProfile.locked_balance) + bonus,
+          total_referrals: (refProfile.total_referrals || 0) + 1,
+          valid_referrals: (refProfile.valid_referrals || 0) + 1,
+          referral_earnings: toNum(refProfile.referral_earnings) + bonus,
+        });
+        await createDeposit({
+          user_id: referrerId, amount: bonus, network: 'Referral Bonus',
+          wallet_address: 'Paystack', status: 'approved', approved_at: refApprovedAt,
+          expires_at: approvedLockExpiresAt(refApprovedAt),
+          referrer_id: req.user.id,
+        });
+        await createReferral({
+          referrer_id: referrerId, referee_id: req.user.id,
+          bonus_amount: bonus, deposit_id: paystackDeposit.id,
+        });
+        await updateUserRank(referrerId);
       }
     }
 
@@ -536,12 +551,17 @@ router.get('/deposits/:id/status', async (req, res) => {
     if (!d) return res.status(404).json({ error: 'Deposit not found' });
     if (d.user_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
 
-    let status = d.status;
-    if (status === 'pending' && d.expires_at && new Date(d.expires_at) < new Date()) {
-      status = 'expired';
-    }
+    const walletExpiresAt = d.created_at
+      ? walletAssignmentExpiresAt(d.created_at)
+      : null;
 
-    res.json({ id: d.id, status, createdAt: d.created_at, expiresAt: d.expires_at });
+    res.json({
+      id: d.id,
+      status: d.status,
+      createdAt: d.created_at,
+      expiresAt: d.expires_at,
+      walletExpiresAt,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -585,10 +605,11 @@ router.post('/paystack/callback', async (req, res) => {
       return res.status(200).json({ status: 'already_credited' });
     }
 
+    const callbackApprovedAt = new Date();
     const paystackDeposit = await createDeposit({
       user_id: user.id, amount: amountInUSD, network: 'Paystack',
-      wallet_address: 'Paystack', status: 'approved', approved_at: new Date(),
-      expires_at: addDays(new Date(), LOCK_DAYS),
+      wallet_address: 'Paystack', status: 'approved', approved_at: callbackApprovedAt,
+      expires_at: approvedLockExpiresAt(callbackApprovedAt),
       reference,
     });
 
@@ -596,30 +617,29 @@ router.post('/paystack/callback', async (req, res) => {
     await updateUserRank(user.id);
 
     // Referral bonus for Paystack callback deposit
-    if (profile.referred_by) {
-      const referrer = await getUserBy('referral_code', profile.referred_by).catch(() => null);
-      if (referrer && referrer.id !== user.id) {
-        const bonus = amountInUSD * REFERRAL_PCT;
-        const refProfile = await getProfile(referrer.id);
-        if (refProfile) {
-          await updateProfile(referrer.id, {
-            locked_balance: toNum(refProfile.locked_balance) + bonus,
-            total_referrals: (refProfile.total_referrals || 0) + 1,
-            valid_referrals: (refProfile.valid_referrals || 0) + 1,
-            referral_earnings: toNum(refProfile.referral_earnings) + bonus,
-          });
-          await createDeposit({
-            user_id: referrer.id, amount: bonus, network: 'Referral Bonus',
-            wallet_address: 'Paystack', status: 'approved', approved_at: new Date(),
-            expires_at: addDays(new Date(), LOCK_DAYS),
-            referrer_id: user.id,
-          });
-          await createReferral({
-            referrer_id: referrer.id, referee_id: user.id,
-            bonus_amount: bonus, deposit_id: paystackDeposit.id,
-          });
-          await updateUserRank(referrer.id);
-        }
+    const referrerId = await resolveReferrerUserId(profile.referred_by);
+    if (referrerId && referrerId !== user.id) {
+      const bonus = amountInUSD * REFERRAL_PCT;
+      const refProfile = await getProfile(referrerId);
+      if (refProfile) {
+        const refApprovedAt = new Date();
+        await updateProfile(referrerId, {
+          locked_balance: toNum(refProfile.locked_balance) + bonus,
+          total_referrals: (refProfile.total_referrals || 0) + 1,
+          valid_referrals: (refProfile.valid_referrals || 0) + 1,
+          referral_earnings: toNum(refProfile.referral_earnings) + bonus,
+        });
+        await createDeposit({
+          user_id: referrerId, amount: bonus, network: 'Referral Bonus',
+          wallet_address: 'Paystack', status: 'approved', approved_at: refApprovedAt,
+          expires_at: approvedLockExpiresAt(refApprovedAt),
+          referrer_id: user.id,
+        });
+        await createReferral({
+          referrer_id: referrerId, referee_id: user.id,
+          bonus_amount: bonus, deposit_id: paystackDeposit.id,
+        });
+        await updateUserRank(referrerId);
       }
     }
 

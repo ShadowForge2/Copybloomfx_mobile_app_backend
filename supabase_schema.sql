@@ -203,6 +203,8 @@ CREATE INDEX IF NOT EXISTS idx_profiles_rank_id ON profiles(rank_id);
 CREATE INDEX IF NOT EXISTS idx_deposits_user_id ON deposits(user_id);
 CREATE INDEX IF NOT EXISTS idx_deposits_status ON deposits(status);
 CREATE INDEX IF NOT EXISTS idx_deposits_referrer_id ON deposits(referrer_id);
+CREATE INDEX IF NOT EXISTS idx_deposits_expires_at ON deposits(expires_at);
+CREATE INDEX IF NOT EXISTS idx_deposits_status_expires ON deposits(status, expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_withdrawals_user_id ON withdrawals(user_id);
 CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON withdrawals(status);

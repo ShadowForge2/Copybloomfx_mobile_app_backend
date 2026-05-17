@@ -12,15 +12,15 @@ import {
   createReferral, createDeposit,
 } from '../config/data.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
-import { toNum, addDays } from '../utils/helpers.js';
+import { toNum } from '../utils/helpers.js';
 import { releaseAssignment } from '../utils/wallets.js';
+import { approvedLockExpiresAt } from '../services/depositExpiry.js';
 
 const router = Router();
 router.use(authMiddleware);
 router.use(adminOnly);
 
 const REFERRAL_PCT = 0.08;
-const LOCK_DAYS = 30;
 
 function rankMax(r) {
   return r.max_balance !== null && r.max_balance !== undefined ? toNum(r.max_balance) : 999999;
@@ -63,18 +63,33 @@ async function updateUserRank(userId) {
 
 // ============ DASHBOARD ============
 
+const QUERY_TIMEOUT = 15000;
+
+async function withFallback(promise, fallback) {
+  try {
+    const result = await Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Query timeout')), QUERY_TIMEOUT)),
+    ]);
+    return result;
+  } catch (e) {
+    console.error('[DB] Query error/timeout:', e.message);
+    return fallback;
+  }
+}
+
 router.get('/dashboard', async (req, res) => {
   try {
     const [totalUsers, totalDepositAmount, totalWithdrawalAmount, pendingDeps, pendingWiths] = await Promise.all([
-      countUsers(),
-      sumDeposits({ status: 'approved' }),
-      sumWithdrawals({ status: 'approved' }),
-      getDeposits({ status: 'pending' }),
-      getWithdrawals({ status: 'pending' }),
+      withFallback(countUsers(), 0),
+      withFallback(sumDeposits({ status: 'approved' }), 0),
+      withFallback(sumWithdrawals({ status: 'approved' }), 0),
+      withFallback(getDeposits({ status: 'pending' }), []),
+      withFallback(getWithdrawals({ status: 'pending' }), []),
     ]);
 
-    const flagged = await countUsers({ is_flagged: true });
-    const banned = await countUsers({ is_banned: true });
+    const flagged = await withFallback(countUsers({ is_flagged: true }), 0);
+    const banned = await withFallback(countUsers({ is_banned: true }), 0);
 
     res.json({
       totalUsers,
@@ -86,7 +101,8 @@ router.get('/dashboard', async (req, res) => {
       bannedUsers: banned,
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[ADMIN DASHBOARD ERROR]', e.message);
+    res.status(500).json({ error: e.message || 'Dashboard query failed' });
   }
 });
 
@@ -96,7 +112,7 @@ router.get('/deposits', async (req, res) => {
   try {
     const where = {};
     if (req.query.status) where.status = req.query.status;
-    const deposits = await getDeposits(where);
+    const deposits = await withFallback(getDeposits(where), []);
 
     const withUsers = await Promise.all(deposits.map(async (d) => {
       let user = null;
@@ -111,6 +127,7 @@ router.get('/deposits', async (req, res) => {
 
     res.json({ deposits: withUsers });
   } catch (e) {
+    console.error('[ADMIN DEPOSITS ERROR]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -121,19 +138,6 @@ router.post('/deposits/:id/approve', async (req, res) => {
     if (!d) return res.status(404).json({ error: 'Deposit not found' });
     if (d.status !== 'pending') return res.status(400).json({ error: 'Deposit not pending' });
 
-    if (d.expires_at && new Date(d.expires_at) < new Date()) {
-      await updateDeposit(d.id, { status: 'expired' });
-      releaseAssignment(d.id);
-      createAuditLog({
-        user_id: req.user.id, target_user_id: d.user_id, action: 'deposit.auto_expire',
-        entity_type: 'deposit', entity_id: d.id,
-        description: `Deposit expired — ${d.expires_at}`,
-        metadata: JSON.stringify({ amount: toNum(d.amount) }),
-        ip_address: req.ip || req.connection.remoteAddress || '',
-      }).catch(() => {});
-      return res.status(400).json({ error: 'Deposit has expired' });
-    }
-
     const user = await getUser(d.user_id).catch(() => null);
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (user.is_banned) return res.status(400).json({ error: 'User is banned' });
@@ -143,8 +147,9 @@ router.post('/deposits/:id/approve', async (req, res) => {
 
     const amt = toNum(d.amount);
     await updateProfile(d.user_id, { locked_balance: toNum(profile.locked_balance) + amt });
-    const expiresAt = addDays(new Date(), LOCK_DAYS);
-    await updateDeposit(d.id, { status: 'approved', approved_at: new Date(), expires_at: expiresAt });
+    const approvedAt = new Date();
+    const expiresAt = approvedLockExpiresAt(approvedAt);
+    await updateDeposit(d.id, { status: 'approved', approved_at: approvedAt, expires_at: expiresAt });
     releaseAssignment(d.id);
 
     if (d.referrer_id && d.referrer_id !== d.user_id) {
@@ -157,10 +162,11 @@ router.post('/deposits/:id/approve', async (req, res) => {
           valid_referrals: (refProfile.valid_referrals || 0) + 1,
           referral_earnings: toNum(refProfile.referral_earnings) + bonus,
         });
+        const refApprovedAt = new Date();
         await createDeposit({
           user_id: d.referrer_id, amount: bonus, network: 'Referral Bonus',
           wallet_address: d.network || 'Crypto', status: 'approved',
-          approved_at: new Date(), expires_at: addDays(new Date(), LOCK_DAYS),
+          approved_at: refApprovedAt, expires_at: approvedLockExpiresAt(refApprovedAt),
           referrer_id: d.user_id,
         });
         await createReferral({
@@ -196,6 +202,13 @@ router.post('/deposits/:id/reject', async (req, res) => {
     await updateDeposit(d.id, { status: 'rejected' });
     releaseAssignment(d.id);
 
+    createNotification(
+      d.user_id,
+      'Deposit Rejected',
+      `Your $${toNum(d.amount).toFixed(2)} ${d.network || 'crypto'} deposit was not approved. Contact support if you sent payment.`,
+      'warning',
+    ).catch(() => {});
+
     createAuditLog({
       user_id: req.user.id, target_user_id: d.user_id, action: 'deposit.reject',
       entity_type: 'deposit', entity_id: d.id,
@@ -216,7 +229,7 @@ router.get('/withdrawals', async (req, res) => {
   try {
     const where = {};
     if (req.query.status) where.status = req.query.status;
-    const withdrawals = await getWithdrawals(where);
+    const withdrawals = await withFallback(getWithdrawals(where), []);
 
     const withUsers = await Promise.all(withdrawals.map(async (w) => {
       let user = null;
@@ -231,6 +244,7 @@ router.get('/withdrawals', async (req, res) => {
 
     res.json({ withdrawals: withUsers });
   } catch (e) {
+    console.error('[ADMIN WITHDRAWALS ERROR]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -248,7 +262,13 @@ router.post('/withdrawals/:id/approve', async (req, res) => {
 
     await updateWithdrawal(w.id, { status: 'approved', processed_at: new Date() });
 
-    createNotification(w.user_id, 'Withdrawal Delivered', 'Your withdrawal has been processed and delivered to your wallet.', 'success').catch(() => {});
+    const wallet = w.wallet_address || 'your wallet';
+    createNotification(
+      w.user_id,
+      'Withdrawal Delivered',
+      `Your withdrawal of $${toNum(w.amount).toFixed(2)} has been sent to ${wallet} on ${w.network || 'crypto'}.`,
+      'success',
+    ).catch(() => {});
 
     createAuditLog({
       user_id: req.user.id, target_user_id: w.user_id, action: 'withdrawal.approve',
@@ -276,6 +296,13 @@ router.post('/withdrawals/:id/reject', async (req, res) => {
     }
     await updateWithdrawal(w.id, { status: 'rejected', processed_at: new Date() });
 
+    createNotification(
+      w.user_id,
+      'Withdrawal Rejected',
+      `Your withdrawal of $${toNum(w.amount).toFixed(2)} was rejected. The amount was returned to your withdrawable balance.`,
+      'warning',
+    ).catch(() => {});
+
     createAuditLog({
       user_id: req.user.id, target_user_id: w.user_id, action: 'withdrawal.reject',
       entity_type: 'withdrawal', entity_id: w.id,
@@ -294,8 +321,8 @@ router.post('/withdrawals/:id/reject', async (req, res) => {
 
 router.get('/promos', async (req, res) => {
   try {
-    const promos = await getAllPromoCodes();
-    const redemptions = await getAllRedemptions();
+    const promos = await withFallback(getAllPromoCodes(), []);
+    const redemptions = await withFallback(getAllRedemptions(), []);
 
     const withDetails = await Promise.all(redemptions.map(async (r) => {
       let user = null;
@@ -317,6 +344,7 @@ router.get('/promos', async (req, res) => {
       redemptions: withDetails,
     });
   } catch (e) {
+    console.error('[ADMIN PROMOS ERROR]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -383,7 +411,7 @@ router.get('/users', async (req, res) => {
     if (filter === 'flagged') where.is_flagged = true;
     if (filter === 'banned') where.is_banned = true;
 
-    const users = await getUsersForAdmin(where);
+    const users = await withFallback(getUsersForAdmin(where), []);
 
     const withProfiles = await Promise.all(users.map(async (u) => {
       const profile = await getProfile(u.id).catch(() => null);
@@ -404,6 +432,7 @@ router.get('/users', async (req, res) => {
 
     res.json({ users: withProfiles });
   } catch (e) {
+    console.error('[ADMIN USERS ERROR]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -620,6 +649,7 @@ router.post('/send-notification', async (req, res) => {
       sent,
       notFound: notFound.length ? notFound : undefined,
       message: `Notification sent to ${sent} user(s)${notFound.length ? `. ${notFound.length} not found: ${notFound.join(', ')}` : ''}`,
+      news: { title, message, category: 'Platform Update' },
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

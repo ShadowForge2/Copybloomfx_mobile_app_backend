@@ -172,6 +172,24 @@ export async function updateDeposit(id, data) {
   return result;
 }
 
+/** Atomic status transition — prevents duplicate expiry / double balance reversal. */
+export async function updateDepositIfStatus(id, expectedStatus, data) {
+  if (USE_SQLITE) {
+    const [affected] = await DepositModel.update(data, { where: { id, status: expectedStatus } });
+    if (!affected) return null;
+    return sq(await DepositModel.findByPk(id));
+  }
+  const { data: result, error } = await supabase
+    .from('deposits')
+    .update(data)
+    .eq('id', id)
+    .eq('status', expectedStatus)
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  return result;
+}
+
 // ---------- Withdrawals ----------
 
 export async function getWithdrawal(id) {
