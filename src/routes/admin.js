@@ -8,7 +8,8 @@ import {
   getAllRedemptions,
   countUsers, sumDeposits, sumWithdrawals,
   getProfileByReferralCode, getUsersForAdmin, getUserBy, getUsers,
-  createNotification, createAuditLog, createTransaction, getTransactions, createReferral,
+  createNotification, createAuditLog, createTransaction, getTransactions,
+  createReferral, createDeposit,
 } from '../config/data.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import { toNum, addDays } from '../utils/helpers.js';
@@ -156,6 +157,12 @@ router.post('/deposits/:id/approve', async (req, res) => {
           valid_referrals: (refProfile.valid_referrals || 0) + 1,
           referral_earnings: toNum(refProfile.referral_earnings) + bonus,
         });
+        await createDeposit({
+          user_id: d.referrer_id, amount: bonus, network: 'Referral Bonus',
+          wallet_address: d.network || 'Crypto', status: 'approved',
+          approved_at: new Date(), expires_at: addDays(new Date(), LOCK_DAYS),
+          referrer_id: d.user_id,
+        });
         await createReferral({
           referrer_id: d.referrer_id, referee_id: d.user_id,
           bonus_amount: bonus, deposit_id: d.id,
@@ -164,6 +171,8 @@ router.post('/deposits/:id/approve', async (req, res) => {
     }
     await updateUserRank(d.user_id);
     if (d.referrer_id) await updateUserRank(d.referrer_id);
+
+    createNotification(d.user_id, 'Deposit Approved', 'Your deposit has been approved and credited to your tradable balance. You can now start copy trading.', 'success').catch(() => {});
 
     createAuditLog({
       user_id: req.user.id, target_user_id: d.user_id, action: 'deposit.approve',
@@ -238,6 +247,8 @@ router.post('/withdrawals/:id/approve', async (req, res) => {
     if (user.is_flagged) return res.status(400).json({ error: 'User is flagged' });
 
     await updateWithdrawal(w.id, { status: 'approved', processed_at: new Date() });
+
+    createNotification(w.user_id, 'Withdrawal Delivered', 'Your withdrawal has been processed and delivered to your wallet.', 'success').catch(() => {});
 
     createAuditLog({
       user_id: req.user.id, target_user_id: w.user_id, action: 'withdrawal.approve',

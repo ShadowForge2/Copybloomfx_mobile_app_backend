@@ -7,7 +7,7 @@ import {
   getLastDailyReward, createDailyReward,
   getPromoCodeByCode, getPromoRedemption, createPromoRedemption, updatePromoCode,
   getNotifications, markNotificationsRead,
-  getProfileByReferralCode, createAuditLog,
+  getProfileByReferralCode, createReferral, createNotification, createAuditLog,
 } from '../config/data.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { toNum, addDays, isSameDay, getMidnightWAT } from '../utils/helpers.js';
@@ -21,6 +21,7 @@ const MIN_DEPOSIT = 7;
 const MIN_WITHDRAWAL = 10;
 const DAILY_REWARD_AMOUNT = 0.1;
 const LOCK_DAYS = 30;
+const REFERRAL_PCT = 0.08;
 const PAIRS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT'];
 
 async function updateUserRank(userId) {
@@ -247,6 +248,8 @@ router.post('/deposits', async (req, res) => {
     });
     assignWallet(network, d.id);
 
+    createNotification(req.user.id, 'Deposit Pending', 'Your deposit is currently being reviewed and will be credited to your tradable balance once approved.', 'info').catch(() => {});
+
     createAuditLog({
       user_id: req.user.id, action: 'deposit.create', entity_type: 'deposit', entity_id: d.id,
       description: `User created $${amt} deposit on ${network}`,
@@ -390,6 +393,11 @@ router.post('/promo/redeem', async (req, res) => {
 
     await updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + bonus });
     const redemption = await createPromoRedemption({ user_id: req.user.id, promo_code_id: promo.id, bonus_amount: bonus });
+    await createDeposit({
+      user_id: req.user.id, amount: bonus, network: 'Promo Bonus',
+      wallet_address: 'Promo', status: 'approved', approved_at: new Date(),
+      expires_at: addDays(new Date(), LOCK_DAYS),
+    });
     await updatePromoCode(promo.id, { usage_count: (promo.usage_count || 0) + 1 });
     await updateUserRank(req.user.id);
 
@@ -469,13 +477,44 @@ router.post('/paystack/verify', async (req, res) => {
     }
 
     const wallet = assignWallet('USDT BEP20', null) || 'Paystack';
-    await createDeposit({
+    const paystackDeposit = await createDeposit({
       user_id: req.user.id, amount: amountInUSD, network: 'Paystack',
       wallet_address: wallet, status: 'approved', approved_at: new Date(),
+      expires_at: addDays(new Date(), LOCK_DAYS),
     });
 
     await updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + amountInUSD });
     await updateUserRank(req.user.id);
+
+    // Referral bonus for Paystack deposit
+    if (profile.referred_by) {
+      const referrer = await getUserBy('referral_code', profile.referred_by).catch(() => null);
+      if (referrer && referrer.id !== req.user.id) {
+        const bonus = amountInUSD * REFERRAL_PCT;
+        const refProfile = await getProfile(referrer.id);
+        if (refProfile) {
+          await updateProfile(referrer.id, {
+            locked_balance: toNum(refProfile.locked_balance) + bonus,
+            total_referrals: (refProfile.total_referrals || 0) + 1,
+            valid_referrals: (refProfile.valid_referrals || 0) + 1,
+            referral_earnings: toNum(refProfile.referral_earnings) + bonus,
+          });
+          await createDeposit({
+            user_id: referrer.id, amount: bonus, network: 'Referral Bonus',
+            wallet_address: 'Paystack', status: 'approved', approved_at: new Date(),
+            expires_at: addDays(new Date(), LOCK_DAYS),
+            referrer_id: req.user.id,
+          });
+          await createReferral({
+            referrer_id: referrer.id, referee_id: req.user.id,
+            bonus_amount: bonus, deposit_id: paystackDeposit.id,
+          });
+          await updateUserRank(referrer.id);
+        }
+      }
+    }
+
+    createNotification(req.user.id, 'Deposit Approved', 'Your deposit has been approved and credited to your tradable balance. You can now start copy trading.', 'success').catch(() => {});
 
     createAuditLog({
       user_id: req.user.id, action: 'payment.paystack',
@@ -546,14 +585,45 @@ router.post('/paystack/callback', async (req, res) => {
       return res.status(200).json({ status: 'already_credited' });
     }
 
-    await createDeposit({
+    const paystackDeposit = await createDeposit({
       user_id: user.id, amount: amountInUSD, network: 'Paystack',
       wallet_address: 'Paystack', status: 'approved', approved_at: new Date(),
+      expires_at: addDays(new Date(), LOCK_DAYS),
       reference,
     });
 
     await updateProfile(user.id, { locked_balance: toNum(profile.locked_balance) + amountInUSD });
     await updateUserRank(user.id);
+
+    // Referral bonus for Paystack callback deposit
+    if (profile.referred_by) {
+      const referrer = await getUserBy('referral_code', profile.referred_by).catch(() => null);
+      if (referrer && referrer.id !== user.id) {
+        const bonus = amountInUSD * REFERRAL_PCT;
+        const refProfile = await getProfile(referrer.id);
+        if (refProfile) {
+          await updateProfile(referrer.id, {
+            locked_balance: toNum(refProfile.locked_balance) + bonus,
+            total_referrals: (refProfile.total_referrals || 0) + 1,
+            valid_referrals: (refProfile.valid_referrals || 0) + 1,
+            referral_earnings: toNum(refProfile.referral_earnings) + bonus,
+          });
+          await createDeposit({
+            user_id: referrer.id, amount: bonus, network: 'Referral Bonus',
+            wallet_address: 'Paystack', status: 'approved', approved_at: new Date(),
+            expires_at: addDays(new Date(), LOCK_DAYS),
+            referrer_id: user.id,
+          });
+          await createReferral({
+            referrer_id: referrer.id, referee_id: user.id,
+            bonus_amount: bonus, deposit_id: paystackDeposit.id,
+          });
+          await updateUserRank(referrer.id);
+        }
+      }
+    }
+
+    createNotification(user.id, 'Deposit Approved', 'Your deposit has been approved and credited to your tradable balance. You can now start copy trading.', 'success').catch(() => {});
 
     res.status(200).json({ status: 'success', usd_amount: amountInUSD });
   } catch (e) {
