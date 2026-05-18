@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { getUser, getUserBy, updateUser, getProfile, createUser, createProfile, getRank, getAllRanks, getUsers, createNotification, createAuditLog, createSession, getProfileByReferralCode } from '../config/data.js';
+import { getUser, getUserBy, updateUser, getProfile, updateProfile, createUser, createProfile, getRank, getAllRanks, getUsers, createNotification, createAuditLog, createSession, getProfileByReferralCode } from '../config/data.js';
 import bcrypt from 'bcryptjs';
 import { signToken, authMiddleware, adminOnly } from '../middleware/auth.js';
 import { generateReferralCode } from '../utils/referral.js';
@@ -80,8 +80,11 @@ router.post('/signup', async (req, res) => {
     });
 
     let refCode = generateReferralCode();
-    const existingRef = await getProfile(refCode).catch(() => null);
-    if (existingRef) refCode = generateReferralCode();
+    let existingRef = await getProfileByReferralCode(refCode).catch(() => null);
+    if (existingRef) {
+      refCode = generateReferralCode();
+      existingRef = await getProfileByReferralCode(refCode).catch(() => null);
+    }
 
     let referredBy = null;
     if (referrerCode) {
@@ -99,6 +102,15 @@ router.post('/signup', async (req, res) => {
       first_name: firstName || null,
       last_name: lastName || null,
     });
+
+    if (referredBy) {
+      const referrerProfile = await getProfile(referredBy).catch(() => null);
+      if (referrerProfile) {
+        await updateProfile(referredBy, {
+          total_referrals: (referrerProfile.total_referrals || 0) + 1,
+        }).catch(() => {});
+      }
+    }
 
     const rank = await getRank(profile.rank_id);
     await autoFlagSameIp(clientIp, user.id);
@@ -213,8 +225,11 @@ router.post('/login', async (req, res) => {
     let profile = await getProfile(user.id);
     if (!profile) {
       let refCode = generateReferralCode();
-      const existingRef = await getProfile(refCode).catch(() => null);
-      if (existingRef) refCode = generateReferralCode();
+      let existingRef = await getProfileByReferralCode(refCode).catch(() => null);
+      if (existingRef) {
+        refCode = generateReferralCode();
+        existingRef = await getProfileByReferralCode(refCode).catch(() => null);
+      }
       const loginRanks = await getAllRanks().then(r => r || []);
       const loginDefaultRankId = loginRanks.length > 0 ? loginRanks[0].id : null;
       profile = await createProfile({

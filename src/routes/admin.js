@@ -10,18 +10,17 @@ import {
   getProfileByReferralCode, getUsersForAdmin, getUserBy, getUsers,
   getUserByUsernameInsensitive,
   createNotification, createAuditLog, createTransaction, getTransactions,
-  createReferral, createDeposit,
+  createDeposit,
 } from '../config/data.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import { toNum, normalizePromoCode, roundMoney } from '../utils/helpers.js';
 import { releaseAssignment } from '../utils/wallets.js';
 import { approvedLockExpiresAt } from '../services/depositExpiry.js';
+import { payReferralCommission } from '../services/referralCommission.js';
 
 const router = Router();
 router.use(authMiddleware);
 router.use(adminOnly);
-
-const REFERRAL_PCT = 0.08;
 
 function rankMax(r) {
   return r.max_balance !== null && r.max_balance !== undefined ? toNum(r.max_balance) : 999999;
@@ -154,27 +153,13 @@ router.post('/deposits/:id/approve', async (req, res) => {
     releaseAssignment(d.id);
 
     if (d.referrer_id && d.referrer_id !== d.user_id) {
-      const bonus = amt * REFERRAL_PCT;
-      const refProfile = await getProfile(d.referrer_id);
-      if (refProfile) {
-        await updateProfile(d.referrer_id, {
-          locked_balance: toNum(refProfile.locked_balance) + bonus,
-          total_referrals: (refProfile.total_referrals || 0) + 1,
-          valid_referrals: (refProfile.valid_referrals || 0) + 1,
-          referral_earnings: toNum(refProfile.referral_earnings) + bonus,
-        });
-        const refApprovedAt = new Date();
-        await createDeposit({
-          user_id: d.referrer_id, amount: bonus, network: 'Referral Bonus',
-          wallet_address: d.network || 'Crypto', status: 'approved',
-          approved_at: refApprovedAt, expires_at: approvedLockExpiresAt(refApprovedAt),
-          referrer_id: d.user_id,
-        });
-        await createReferral({
-          referrer_id: d.referrer_id, referee_id: d.user_id,
-          bonus_amount: bonus, deposit_id: d.id,
-        });
-      }
+      await payReferralCommission({
+        referrerId: d.referrer_id,
+        refereeId: d.user_id,
+        depositId: d.id,
+        depositAmount: amt,
+        walletNetwork: d.network || 'Crypto',
+      });
     }
     await updateUserRank(d.user_id);
     if (d.referrer_id) await updateUserRank(d.referrer_id);

@@ -333,6 +333,46 @@ export async function createReferral(data) {
   return result;
 }
 
+export async function getReferralByDepositId(depositId) {
+  if (!depositId) return null;
+  if (USE_SQLITE) {
+    return sq(await ReferralModel.findOne({ where: { deposit_id: depositId } }));
+  }
+  const { data, error } = await supabase.from('referrals').select('*').eq('deposit_id', depositId).maybeSingle();
+  if (error && error.code === 'PGRST116') return null;
+  if (error) throw error;
+  return data;
+}
+
+export async function getReferrals(where = {}) {
+  if (USE_SQLITE) {
+    return mq(await ReferralModel.findAll({
+      where,
+      order: [['created_at', 'DESC']],
+    }));
+  }
+  let q = supabase.from('referrals').select('*');
+  for (const [k, v] of Object.entries(where)) q = q.eq(k, v);
+  const { data, error } = await q.order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getProfilesByReferredBy(referrerUserId) {
+  if (!referrerUserId) return [];
+  if (USE_SQLITE) {
+    return mq(await ProfileModel.findAll({
+      where: { referred_by: referrerUserId },
+      order: [['created_at', 'DESC']],
+    }));
+  }
+  const { data, error } = await supabase.from('profiles').select('*')
+    .eq('referred_by', referrerUserId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
 // ---------- Promo Codes ----------
 
 export async function getPromoCode(id) {

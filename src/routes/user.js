@@ -8,7 +8,8 @@ import {
   getPromoCodeByCode, getPromoRedemption, createPromoRedemption,
   incrementPromoUsageIfBelowLimit, decrementPromoUsage,
   getNotifications, markNotificationsRead, markNotificationRead,
-  getProfileByReferralCode, createReferral, createNotification, createAuditLog,
+  getProfileByReferralCode, getProfilesByReferredBy, getReferrals,
+  createNotification, createAuditLog,
 } from '../config/data.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { toNum, isSameDay, getMidnightWAT, normalizePromoCode, randomPromoBonus } from '../utils/helpers.js';
@@ -20,6 +21,7 @@ import {
 } from '../services/depositExpiry.js';
 import { NETWORKS, assignWallet, getAssignment, releaseAssignment } from '../utils/wallets.js';
 import { paystackInit, paystackVerify, convertNGNtoUSD } from '../utils/paystack.js';
+import { payReferralCommission } from '../services/referralCommission.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -27,8 +29,11 @@ router.use(authMiddleware);
 const MIN_DEPOSIT = 7;
 const MIN_WITHDRAWAL = 10;
 const DAILY_REWARD_AMOUNT = 0.1;
-const REFERRAL_PCT = 0.08;
 const PAIRS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT'];
+
+function refereeHasApprovedDeposit(deposits) {
+  return deposits.some((d) => d.status === 'approved' && d.network !== 'Referral Bonus');
+}
 
 async function updateUserRank(userId) {
   const profile = await getProfile(userId);
@@ -474,12 +479,36 @@ router.get('/referral', async (req, res) => {
   try {
     const profile = await getProfile(req.user.id);
     const rank = profile ? await getRank(profile.rank_id) : null;
+    const refereeProfiles = await getProfilesByReferredBy(req.user.id);
+
+    const referrals = await Promise.all(refereeProfiles.map(async (p) => {
+      const referee = await getUser(p.user_id).catch(() => null);
+      const deposits = await getDeposits({ user_id: p.user_id });
+      const commissionRows = await getReferrals({
+        referrer_id: req.user.id,
+        referee_id: p.user_id,
+      });
+      const totalCommission = commissionRows.reduce((s, r) => s + toNum(r.bonus_amount), 0);
+      const isValid = refereeHasApprovedDeposit(deposits);
+      return {
+        userId: p.user_id,
+        username: referee?.username ?? 'Unknown',
+        joinedAt: p.created_at,
+        status: isValid ? 'VALID' : 'PENDING',
+        totalCommissionEarned: totalCommission,
+      };
+    }));
+
+    const totalReferrals = refereeProfiles.length;
+    const validReferrals = referrals.filter((r) => r.status === 'VALID').length;
+
     res.json({
       profile: profileToJson(profile, rank),
-      totalReferrals: profile?.total_referrals ?? 0,
-      validReferrals: profile?.valid_referrals ?? 0,
-      referralEarnings: toNum(profile?.referral_earnings),
       referralCode: profile?.referral_code,
+      referralEarnings: toNum(profile?.referral_earnings),
+      totalReferrals,
+      validReferrals,
+      referrals,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -541,31 +570,16 @@ router.post('/paystack/verify', async (req, res) => {
     await updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + amountInUSD });
     await updateUserRank(req.user.id);
 
-    // Referral bonus for Paystack deposit
     const referrerId = await resolveReferrerUserId(profile.referred_by);
     if (referrerId && referrerId !== req.user.id) {
-      const bonus = amountInUSD * REFERRAL_PCT;
-      const refProfile = await getProfile(referrerId);
-      if (refProfile) {
-        const refApprovedAt = new Date();
-        await updateProfile(referrerId, {
-          locked_balance: toNum(refProfile.locked_balance) + bonus,
-          total_referrals: (refProfile.total_referrals || 0) + 1,
-          valid_referrals: (refProfile.valid_referrals || 0) + 1,
-          referral_earnings: toNum(refProfile.referral_earnings) + bonus,
-        });
-        await createDeposit({
-          user_id: referrerId, amount: bonus, network: 'Referral Bonus',
-          wallet_address: 'Paystack', status: 'approved', approved_at: refApprovedAt,
-          expires_at: approvedLockExpiresAt(refApprovedAt),
-          referrer_id: req.user.id,
-        });
-        await createReferral({
-          referrer_id: referrerId, referee_id: req.user.id,
-          bonus_amount: bonus, deposit_id: paystackDeposit.id,
-        });
-        await updateUserRank(referrerId);
-      }
+      const commission = await payReferralCommission({
+        referrerId,
+        refereeId: req.user.id,
+        depositId: paystackDeposit.id,
+        depositAmount: amountInUSD,
+        walletNetwork: 'Paystack',
+      });
+      if (commission.paid) await updateUserRank(referrerId);
     }
 
     createNotification(req.user.id, 'Deposit Approved', 'Your deposit has been approved and credited to your tradable balance. You can now start copy trading.', 'success').catch(() => {});
@@ -655,31 +669,16 @@ router.post('/paystack/callback', async (req, res) => {
     await updateProfile(user.id, { locked_balance: toNum(profile.locked_balance) + amountInUSD });
     await updateUserRank(user.id);
 
-    // Referral bonus for Paystack callback deposit
     const referrerId = await resolveReferrerUserId(profile.referred_by);
     if (referrerId && referrerId !== user.id) {
-      const bonus = amountInUSD * REFERRAL_PCT;
-      const refProfile = await getProfile(referrerId);
-      if (refProfile) {
-        const refApprovedAt = new Date();
-        await updateProfile(referrerId, {
-          locked_balance: toNum(refProfile.locked_balance) + bonus,
-          total_referrals: (refProfile.total_referrals || 0) + 1,
-          valid_referrals: (refProfile.valid_referrals || 0) + 1,
-          referral_earnings: toNum(refProfile.referral_earnings) + bonus,
-        });
-        await createDeposit({
-          user_id: referrerId, amount: bonus, network: 'Referral Bonus',
-          wallet_address: 'Paystack', status: 'approved', approved_at: refApprovedAt,
-          expires_at: approvedLockExpiresAt(refApprovedAt),
-          referrer_id: user.id,
-        });
-        await createReferral({
-          referrer_id: referrerId, referee_id: user.id,
-          bonus_amount: bonus, deposit_id: paystackDeposit.id,
-        });
-        await updateUserRank(referrerId);
-      }
+      const commission = await payReferralCommission({
+        referrerId,
+        refereeId: user.id,
+        depositId: paystackDeposit.id,
+        depositAmount: amountInUSD,
+        walletNetwork: 'Paystack',
+      });
+      if (commission.paid) await updateUserRank(referrerId);
     }
 
     createNotification(user.id, 'Deposit Approved', 'Your deposit has been approved and credited to your tradable balance. You can now start copy trading.', 'success').catch(() => {});
