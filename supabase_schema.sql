@@ -220,6 +220,7 @@ CREATE INDEX IF NOT EXISTS idx_promo_codes_code ON promo_codes(code);
 
 CREATE INDEX IF NOT EXISTS idx_promo_redemptions_user_id ON promo_redemptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_promo_redemptions_promo_code_id ON promo_redemptions(promo_code_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_promo_redemptions_user_promo ON promo_redemptions(user_id, promo_code_id);
 
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read);

@@ -44,6 +44,21 @@ export async function getUserBy(field, value) {
   return data;
 }
 
+/** Case-insensitive username lookup for admin notification targeting. */
+export async function getUserByUsernameInsensitive(username) {
+  const normalized = String(username ?? '').trim();
+  if (!normalized) return null;
+  if (USE_SQLITE) {
+    return sq(await UserModel.findOne({
+      where: literal(`LOWER(username) = ${sequelize.escape(normalized.toLowerCase())}`),
+    }));
+  }
+  const { data, error } = await supabase.from('users').select('*').ilike('username', normalized).maybeSingle();
+  if (error && error.code === 'PGRST116') return null;
+  if (error) throw error;
+  return data;
+}
+
 export async function getUsers(where = {}, opts = {}) {
   if (USE_SQLITE) {
     const q = { where };
@@ -330,10 +345,14 @@ export async function getPromoCode(id) {
 }
 
 export async function getPromoCodeByCode(code) {
+  const normalized = String(code ?? '').trim().toUpperCase();
+  if (!normalized) return null;
   if (USE_SQLITE) {
-    return sq(await PromoCodeModel.findOne({ where: { code } }));
+    return sq(await PromoCodeModel.findOne({
+      where: literal(`UPPER(code) = ${sequelize.escape(normalized)}`),
+    }));
   }
-  const { data, error } = await supabase.from('promo_codes').select('*').eq('code', code).single();
+  const { data, error } = await supabase.from('promo_codes').select('*').ilike('code', normalized).maybeSingle();
   if (error && error.code === 'PGRST116') return null;
   if (error) throw error;
   return data;
@@ -388,6 +407,47 @@ export async function createPromoRedemption(data) {
   return result;
 }
 
+/** Optimistic lock: only increments when usage_count still matches expectedCount. */
+export async function incrementPromoUsageIfBelowLimit(promoId, expectedCount, usageLimit) {
+  const current = expectedCount ?? 0;
+  if (usageLimit != null && current >= usageLimit) return false;
+
+  if (USE_SQLITE) {
+    const [affected] = await PromoCodeModel.update(
+      { usage_count: current + 1 },
+      { where: { id: promoId, usage_count: current } },
+    );
+    return affected === 1;
+  }
+
+  const { data, error } = await supabase
+    .from('promo_codes')
+    .update({ usage_count: current + 1 })
+    .eq('id', promoId)
+    .eq('usage_count', current)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  return data != null;
+}
+
+/** Roll back usage increment when redemption insert fails (duplicate race). */
+export async function decrementPromoUsage(promoId, expectedCountAfterIncrement) {
+  const target = Math.max(0, (expectedCountAfterIncrement ?? 1) - 1);
+  if (USE_SQLITE) {
+    await PromoCodeModel.update(
+      { usage_count: target },
+      { where: { id: promoId, usage_count: expectedCountAfterIncrement } },
+    );
+    return;
+  }
+  await supabase
+    .from('promo_codes')
+    .update({ usage_count: target })
+    .eq('id', promoId)
+    .eq('usage_count', expectedCountAfterIncrement);
+}
+
 export async function getAllRedemptions() {
   if (USE_SQLITE) {
     return mq(await PromoRedemptionModel.findAll({ order: [['created_at', 'DESC']], limit: 100 }));
@@ -420,6 +480,23 @@ export async function markNotificationsRead(userId) {
   }
   const { error } = await supabase.from('notifications')
     .update({ is_read: true }).eq('user_id', userId).eq('is_read', false);
+  if (error) throw error;
+}
+
+export async function markNotificationRead(userId, notificationId) {
+  if (!notificationId) return;
+  if (USE_SQLITE) {
+    await NotificationModel.update(
+      { is_read: true },
+      { where: { id: notificationId, user_id: userId, is_read: false } },
+    );
+    return;
+  }
+  const { error } = await supabase.from('notifications')
+    .update({ is_read: true })
+    .eq('id', notificationId)
+    .eq('user_id', userId)
+    .eq('is_read', false);
   if (error) throw error;
 }
 

@@ -9,6 +9,9 @@ const PromoRedemption = sequelize.define('PromoRedemption', {
   created_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
 }, {
   tableName: 'promo_redemptions',
+  indexes: [
+    { unique: true, fields: ['user_id', 'promo_code_id'] },
+  ],
 });
 
 export default PromoRedemption;

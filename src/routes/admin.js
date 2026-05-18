@@ -8,11 +8,12 @@ import {
   getAllRedemptions,
   countUsers, sumDeposits, sumWithdrawals,
   getProfileByReferralCode, getUsersForAdmin, getUserBy, getUsers,
+  getUserByUsernameInsensitive,
   createNotification, createAuditLog, createTransaction, getTransactions,
   createReferral, createDeposit,
 } from '../config/data.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
-import { toNum } from '../utils/helpers.js';
+import { toNum, normalizePromoCode, roundMoney } from '../utils/helpers.js';
 import { releaseAssignment } from '../utils/wallets.js';
 import { approvedLockExpiresAt } from '../services/depositExpiry.js';
 
@@ -354,11 +355,23 @@ router.post('/promos', async (req, res) => {
     const { code, bonusMin, bonusMax, expiration, usageLimit } = req.body;
     if (!code || !String(code).trim()) return res.status(400).json({ error: 'Code required' });
 
-    const existing = await getPromoCodeByCode(String(code).trim()).catch(() => null);
+    const normalizedCode = normalizePromoCode(code);
+    const minReward = roundMoney(bonusMin);
+    const maxReward = roundMoney(bonusMax);
+    if (maxReward < minReward) {
+      return res.status(400).json({ error: 'Maximum reward must be greater than or equal to minimum reward' });
+    }
+    if (maxReward <= 0) {
+      return res.status(400).json({ error: 'Maximum reward must be greater than 0' });
+    }
+
+    const existing = await getPromoCodeByCode(normalizedCode).catch(() => null);
     if (existing) return res.status(400).json({ error: 'Code already exists' });
 
     const p = await createPromoCode({
-      code: String(code).trim(), bonus_min: parseFloat(bonusMin) || 0, bonus_max: parseFloat(bonusMax) || 0,
+      code: normalizedCode,
+      bonus_min: minReward,
+      bonus_max: maxReward,
       expiration: expiration ? new Date(expiration) : null,
       usage_limit: usageLimit != null ? parseInt(usageLimit, 10) : null,
       status: 'active',
@@ -619,18 +632,21 @@ router.post('/send-notification', async (req, res) => {
     if (sendType === 'targeted') {
       if (!targetUsers || !targetUsers.length) return res.status(400).json({ error: 'Target users required for targeted send' });
       for (const target of targetUsers) {
-        const u = await getUserBy('username', target.trim()).catch(() => null)
-                 || await getUserBy('email', target.trim()).catch(() => null);
+        const trimmed = target.trim();
+        const u = await getUserByUsernameInsensitive(trimmed).catch(() => null)
+                 || await getUserBy('email', trimmed).catch(() => null);
         if (u) {
           await createNotification(u.id, title, message, notificationType);
           sent++;
         } else {
-          notFound.push(target.trim());
+          notFound.push(trimmed);
         }
       }
     } else {
-      // system-wide: send to all active users
-      const users = await getUsers({ is_banned: false }).catch(() => []);
+      const users = await getUsers({ is_banned: false });
+      if (!users.length) {
+        return res.status(400).json({ error: 'No active users found to receive notification' });
+      }
       for (const u of users) {
         await createNotification(u.id, title, message, notificationType);
         sent++;

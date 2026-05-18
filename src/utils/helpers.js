@@ -3,6 +3,28 @@ export function toNum(v) {
   return isNaN(n) ? 0 : n;
 }
 
+/** Promo codes are stored and matched case-insensitively (uppercase). */
+export function normalizePromoCode(code) {
+  return String(code ?? '').trim().toUpperCase();
+}
+
+/** Round to cents — fintech-safe money handling. */
+export function roundMoney(v) {
+  return Math.round(toNum(v) * 100) / 100;
+}
+
+/**
+ * Random reward in [min, max] inclusive of bounds after rounding.
+ * Swaps reversed min/max instead of producing invalid amounts.
+ */
+export function randomPromoBonus(bonusMin, bonusMax) {
+  const lo = roundMoney(Math.min(toNum(bonusMin), toNum(bonusMax)));
+  const hi = roundMoney(Math.max(toNum(bonusMin), toNum(bonusMax)));
+  if (hi <= lo) return lo;
+  const raw = lo + Math.random() * (hi - lo);
+  return roundMoney(raw);
+}
+
 export function addDays(date, days) {
   const d = new Date(date);
   d.setDate(d.getDate() + days);

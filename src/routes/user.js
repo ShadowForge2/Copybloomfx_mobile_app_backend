@@ -5,12 +5,13 @@ import {
   getWithdrawals, createWithdrawal,
   getCopyTrades, countCopyTrades, createCopyTrade,
   getLastDailyReward, createDailyReward,
-  getPromoCodeByCode, getPromoRedemption, createPromoRedemption, updatePromoCode,
-  getNotifications, markNotificationsRead,
+  getPromoCodeByCode, getPromoRedemption, createPromoRedemption,
+  incrementPromoUsageIfBelowLimit, decrementPromoUsage,
+  getNotifications, markNotificationsRead, markNotificationRead,
   getProfileByReferralCode, createReferral, createNotification, createAuditLog,
 } from '../config/data.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { toNum, isSameDay, getMidnightWAT } from '../utils/helpers.js';
+import { toNum, isSameDay, getMidnightWAT, normalizePromoCode, randomPromoBonus } from '../utils/helpers.js';
 import {
   walletAssignmentExpiresAt,
   approvedLockExpiresAt,
@@ -394,40 +395,76 @@ router.post('/promo/redeem', async (req, res) => {
     const { code } = req.body;
     if (!code || !String(code).trim()) return res.status(400).json({ error: 'Code required' });
 
-    const promo = await getPromoCodeByCode(String(code).trim());
+    const promo = await getPromoCodeByCode(normalizePromoCode(code));
     if (!promo) return res.status(400).json({ error: 'Invalid or expired promo code' });
     if (promo.status !== 'active') return res.status(400).json({ error: 'Promo code not active' });
-    if (promo.expiration && new Date(promo.expiration) < new Date()) return res.status(400).json({ error: 'Promo code expired' });
-    if (promo.usage_limit != null && (promo.usage_count || 0) >= promo.usage_limit) return res.status(400).json({ error: 'Promo code usage limit reached' });
+    if (promo.expiration && new Date(promo.expiration) < new Date()) {
+      return res.status(400).json({ error: 'Promo code expired' });
+    }
+
+    const usageCount = promo.usage_count || 0;
+    if (promo.usage_limit != null && usageCount >= promo.usage_limit) {
+      return res.status(400).json({ error: 'Promo code usage limit reached' });
+    }
 
     const already = await getPromoRedemption(req.user.id, promo.id);
     if (already) return res.status(400).json({ error: 'Already redeemed this promo' });
 
-    const bonus = toNum(promo.bonus_min) + Math.random() * (toNum(promo.bonus_max) - toNum(promo.bonus_min));
+    const bonus = randomPromoBonus(promo.bonus_min, promo.bonus_max);
+    const nextUsageCount = usageCount + 1;
+
+    const reserved = await incrementPromoUsageIfBelowLimit(promo.id, usageCount, promo.usage_limit);
+    if (!reserved) {
+      return res.status(400).json({ error: 'Promo code usage limit reached' });
+    }
+
+    let redemption;
+    try {
+      redemption = await createPromoRedemption({
+        user_id: req.user.id,
+        promo_code_id: promo.id,
+        bonus_amount: bonus,
+      });
+    } catch (insertErr) {
+      await decrementPromoUsage(promo.id, nextUsageCount);
+      const msg = String(insertErr?.message ?? '').toLowerCase();
+      if (insertErr?.code === '23505' || msg.includes('duplicate') || msg.includes('unique')) {
+        return res.status(400).json({ error: 'Already redeemed this promo' });
+      }
+      throw insertErr;
+    }
+
     const profile = await getProfile(req.user.id);
-    if (!profile) return res.status(404).json({ error: 'Profile not found' });
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
 
     await updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + bonus });
-    const redemption = await createPromoRedemption({ user_id: req.user.id, promo_code_id: promo.id, bonus_amount: bonus });
     const promoApprovedAt = new Date();
     await createDeposit({
-      user_id: req.user.id, amount: bonus, network: 'Promo Bonus',
-      wallet_address: 'Promo', status: 'approved', approved_at: promoApprovedAt,
+      user_id: req.user.id,
+      amount: bonus,
+      network: 'Promo Bonus',
+      wallet_address: 'Promo',
+      status: 'approved',
+      approved_at: promoApprovedAt,
       expires_at: approvedLockExpiresAt(promoApprovedAt),
     });
-    await updatePromoCode(promo.id, { usage_count: (promo.usage_count || 0) + 1 });
     await updateUserRank(req.user.id);
 
     createAuditLog({
-      user_id: req.user.id, action: 'promo.redeem', entity_type: 'promo_redemption', entity_id: redemption.id,
+      user_id: req.user.id,
+      action: 'promo.redeem',
+      entity_type: 'promo_redemption',
+      entity_id: redemption.id,
       description: `User redeemed promo code "${promo.code}"`,
-      metadata: JSON.stringify({ code: promo.code, bonus: Math.round(bonus * 100) / 100 }),
+      metadata: JSON.stringify({ code: promo.code, bonus }),
       ip_address: req.ip || req.connection.remoteAddress || '',
     }).catch(() => {});
 
     const updated = await getProfile(req.user.id);
     const rank = updated ? await getRank(updated.rank_id) : null;
-    res.json({ success: true, bonus: Math.round(bonus * 100) / 100, profile: profileToJson(updated, rank) });
+    res.json({ success: true, bonus, profile: profileToJson(updated, rank) });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -671,7 +708,12 @@ router.get('/notifications', async (req, res) => {
 
 router.post('/notifications/mark-read', async (req, res) => {
   try {
-    await markNotificationsRead(req.user.id);
+    const { id } = req.body || {};
+    if (id) {
+      await markNotificationRead(req.user.id, String(id));
+    } else {
+      await markNotificationsRead(req.user.id);
+    }
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
