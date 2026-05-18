@@ -77,16 +77,40 @@ async function syncDatabase() {
   await sequelize.sync();
 
   // Ensure all expected columns exist on profiles table (safe migration for SQLite)
-  const missingColumns = [
-    ['first_name', 'TEXT'],
-    ['last_name', 'TEXT'],
+  // SQLite doesn't support adding columns with constraints easily, so we check and add if missing
+  const columnsToAdd = [
+    { name: 'first_name', type: 'TEXT' },
+    { name: 'last_name', type: 'TEXT' },
+    { name: 'referred_by', type: 'TEXT' },
   ];
-  for (const [col, colType] of missingColumns) {
+
+  for (const { name, type } of columnsToAdd) {
     try {
-      await sequelize.query(`ALTER TABLE profiles ADD COLUMN ${col} ${colType}`);
-    } catch (_) {
-      // Column already exists — swallow error
+      await sequelize.query(`ALTER TABLE profiles ADD COLUMN "${name}" ${type}`);
+      console.log(`[DB] Added column '${name}' to profiles table`);
+    } catch (e) {
+      // SQLITE_ERROR: duplicate column name means column already exists - this is expected
+      if (e.message && e.message.includes('duplicate column name')) {
+        console.log(`[DB] Column '${name}' already exists in profiles table (verified)`);
+      } else {
+        console.error(`[DB] Error adding column '${name}':`, e.message);
+      }
     }
+  }
+
+  // Verify the schema is correct after migration using raw SQLite
+  try {
+    const result = await sequelize.query('PRAGMA table_info(profiles)', { type: sequelize.QueryTypes.SELECT });
+    const columnNames = result.map(row => row.name || row.cname || Object.values(row)[1]);
+    const requiredColumns = ['first_name', 'last_name', 'referred_by'];
+    const missing = requiredColumns.filter(col => !columnNames.includes(col));
+    if (missing.length > 0) {
+      console.error(`[DB] WARNING: Missing columns in profiles table: ${missing.join(', ')}`);
+    } else {
+      console.log('[DB] Profiles table schema verified - all required columns present');
+    }
+  } catch (e) {
+    console.error('[DB] Error verifying profiles schema:', e.message);
   }
   const count = await Rank.count();
   if (count === 0) {

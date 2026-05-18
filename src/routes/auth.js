@@ -93,7 +93,8 @@ router.post('/signup', async (req, res) => {
     }
 
     const ranks = await getAllRanks();
-    const defaultRankId = ranks.length > 0 ? ranks[0].id : null;
+    // Ensure we always have a valid rank_id (default to 1 if ranks table is empty)
+    const defaultRankId = ranks.length > 0 ? ranks[0].id : 1;
     const profile = await createProfile({
       user_id: user.id,
       rank_id: defaultRankId,
@@ -231,7 +232,8 @@ router.post('/login', async (req, res) => {
         existingRef = await getProfileByReferralCode(refCode).catch(() => null);
       }
       const loginRanks = await getAllRanks().then(r => r || []);
-      const loginDefaultRankId = loginRanks.length > 0 ? loginRanks[0].id : null;
+      // Ensure we always have a valid rank_id (default to 1 if ranks table is empty)
+      const loginDefaultRankId = loginRanks.length > 0 ? loginRanks[0].id : 1;
       profile = await createProfile({
         user_id: user.id,
         rank_id: loginDefaultRankId,
