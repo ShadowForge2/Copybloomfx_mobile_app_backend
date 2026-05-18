@@ -74,7 +74,20 @@ const RANK_SEED = [
 ];
 
 async function syncDatabase() {
-  await sequelize.sync({ alter: true });
+  await sequelize.sync();
+
+  // Ensure all expected columns exist on profiles table (safe migration for SQLite)
+  const missingColumns = [
+    ['first_name', 'TEXT'],
+    ['last_name', 'TEXT'],
+  ];
+  for (const [col, colType] of missingColumns) {
+    try {
+      await sequelize.query(`ALTER TABLE profiles ADD COLUMN ${col} ${colType}`);
+    } catch (_) {
+      // Column already exists — swallow error
+    }
+  }
   const count = await Rank.count();
   if (count === 0) {
     await Rank.bulkCreate(RANK_SEED);
