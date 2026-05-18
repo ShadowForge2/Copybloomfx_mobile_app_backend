@@ -26,6 +26,13 @@ function mq(results) {
   return (results || []).map(r => r.get({ plain: true }));
 }
 
+function toNum(value) {
+  if (value == null) return 0;
+  if (typeof value === 'number') return value;
+  const parsed = parseFloat(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 // ---------- Users ----------
 
 export async function getUser(id) {
@@ -283,6 +290,120 @@ export async function createCopyTrade(data) {
   const { data: result, error } = await supabase.from('copy_trades').insert(data).select().single();
   if (error) throw error;
   return result;
+}
+
+export async function getPendingCopyTradesToClose(userId) {
+  if (USE_SQLITE) {
+    return mq(await CopyTradeModel.findAll({
+      where: { user_id: userId, status: 'pending', close_at: { [Op.lte]: new Date() } },
+      order: [['created_at', 'ASC']],
+    }));
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase.from('copy_trades')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('status', 'pending')
+    .lte('close_at', now)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function updateCopyTradesStatus(ids, status) {
+  if (!ids.length) return [];
+  if (USE_SQLITE) {
+    await CopyTradeModel.update({ status }, { where: { id: ids } });
+    return mq(await CopyTradeModel.findAll({ where: { id: ids } }));
+  }
+  const { data, error } = await supabase.from('copy_trades').update({ status }).in('id', ids).select();
+  if (error) throw error;
+  return data || [];
+}
+
+export async function updateUserRank(userId) {
+  const profile = await getProfile(userId);
+  if (!profile) return null;
+  const total = toNum(profile.locked_balance) + toNum(profile.withdrawable_balance);
+  if (total <= 0) {
+    if (profile.rank_id !== null) await updateProfile(userId, { rank_id: null });
+    return null;
+  }
+  const ranks = await getAllRanks();
+  let newRankId = null;
+  for (const r of ranks) {
+    if (total >= toNum(r.min_balance)) {
+      if (r.max_balance === null || total <= toNum(r.max_balance)) {
+        newRankId = r.id;
+        break;
+      }
+    }
+  }
+  if (newRankId !== profile.rank_id) await updateProfile(userId, { rank_id: newRankId });
+  return newRankId ? getRank(newRankId) : null;
+}
+
+export async function processMatureCopyTrades(userId) {
+  const matureTrades = await getPendingCopyTradesToClose(userId);
+  if (!matureTrades.length) return matureTrades;
+
+  const totalProfit = matureTrades.reduce((sum, trade) => sum + Math.max(toNum(trade.profit), 0), 0);
+  const ids = matureTrades.map((t) => t.id);
+  await updateCopyTradesStatus(ids, 'completed');
+
+  if (totalProfit > 0) {
+    const profile = await getProfile(userId);
+    if (profile) {
+      await updateProfile(userId, { withdrawable_balance: toNum(profile.withdrawable_balance) + totalProfit });
+      await updateUserRank(userId);
+    }
+  }
+
+  return matureTrades;
+}
+
+export async function getPendingCopyTradesToCloseAll() {
+  if (USE_SQLITE) {
+    return mq(await CopyTradeModel.findAll({
+      where: { user_id: { [Op.ne]: null }, status: 'pending', close_at: { [Op.lte]: new Date() } },
+      order: [['created_at', 'ASC']],
+    }));
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase.from('copy_trades')
+    .select('*')
+    .eq('status', 'pending')
+    .lte('close_at', now)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function processMatureCopyTradesAll() {
+  const matureTrades = await getPendingCopyTradesToCloseAll();
+  if (!matureTrades.length) return 0;
+
+  const userProfitMap = new Map();
+  const ids = [];
+  for (const trade of matureTrades) {
+    ids.push(trade.id);
+    const profit = Math.max(toNum(trade.profit), 0);
+    userProfitMap.set(trade.user_id, (userProfitMap.get(trade.user_id) || 0) + profit);
+  }
+
+  await updateCopyTradesStatus(ids, 'completed');
+
+  for (const [userId, profit] of userProfitMap.entries()) {
+    if (profit <= 0) continue;
+    const profile = await getProfile(userId);
+    if (!profile) continue;
+    await updateProfile(userId, { withdrawable_balance: toNum(profile.withdrawable_balance) + profit });
+    await updateUserRank(userId);
+  }
+
+  return matureTrades.length;
 }
 
 // ---------- Daily Rewards ----------

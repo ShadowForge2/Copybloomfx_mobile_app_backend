@@ -1,0 +1,5 @@
+ALTER TABLE copy_trades
+  ADD COLUMN IF NOT EXISTS close_at TIMESTAMPTZ;
+
+ALTER TABLE copy_trades
+  ALTER COLUMN status SET DEFAULT 'pending';

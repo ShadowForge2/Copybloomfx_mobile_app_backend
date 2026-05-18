@@ -8,7 +8,8 @@ const CopyTrade = sequelize.define('CopyTrade', {
   action: { type: DataTypes.TEXT },
   amount: { type: DataTypes.DECIMAL, defaultValue: 0 },
   profit: { type: DataTypes.DECIMAL, defaultValue: 0 },
-  status: { type: DataTypes.TEXT, defaultValue: 'completed' },
+  status: { type: DataTypes.TEXT, defaultValue: 'pending' },
+  close_at: { type: DataTypes.DATE, allowNull: true },
   created_at: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
 }, {
   tableName: 'copy_trades',

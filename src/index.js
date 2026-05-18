@@ -11,6 +11,7 @@ import adminRoutes from './routes/admin.js';
 import supabaseRoutes from './routes/supabase.js';
 import supportRoutes from './routes/support.js';
 import { processApprovedDepositsExpiry, LOCK_DAYS } from './services/depositExpiry.js';
+import { processMatureCopyTradesAll } from './config/data.js';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -74,6 +75,7 @@ app.use((err, _req, res, _next) => {
 // ----- Server-side scheduled tasks -----
 
 const EXPIRY_CHECK_INTERVAL = 5 * 60 * 1000; // every 5 minutes
+const COPY_TRADE_CLOSE_INTERVAL = 60 * 1000; // every 1 minute
 
 async function runDepositExpiryJobs() {
   try {
@@ -83,6 +85,17 @@ async function runDepositExpiryJobs() {
     }
   } catch (e) {
     console.error('[CRON] Deposit expiry error:', e.message);
+  }
+}
+
+async function runCopyTradeCloseJobs() {
+  try {
+    const closedCount = await processMatureCopyTradesAll();
+    if (closedCount > 0) {
+      console.log(`[CRON] Closed ${closedCount} matured copy trade(s)`);
+    }
+  } catch (e) {
+    console.error('[CRON] Copy trade auto-close error:', e.message);
   }
 }
 
@@ -99,8 +112,13 @@ app.listen(PORT, '0.0.0.0', () => {
 
   runDepositExpiryJobs();
   setInterval(runDepositExpiryJobs, EXPIRY_CHECK_INTERVAL);
+
+  runCopyTradeCloseJobs();
+  setInterval(runCopyTradeCloseJobs, COPY_TRADE_CLOSE_INTERVAL);
+
   console.log(
     `[CRON] Deposit expiry active every ${EXPIRY_CHECK_INTERVAL / 60000} minutes ` +
       `(crypto pending=admin only, approved lock=${LOCK_DAYS} days)`,
   );
+  console.log(`[CRON] Copy trade auto-close active every ${COPY_TRADE_CLOSE_INTERVAL / 1000} seconds`);
 });

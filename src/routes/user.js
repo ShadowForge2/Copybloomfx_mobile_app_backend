@@ -4,6 +4,7 @@ import {
   getDeposit, getDeposits, createDeposit,
   getWithdrawals, createWithdrawal,
   getCopyTrades, countCopyTrades, createCopyTrade,
+  processMatureCopyTrades,
   getLastDailyReward, createDailyReward,
   getPromoCodeByCode, getPromoRedemption, createPromoRedemption,
   incrementPromoUsageIfBelowLimit, decrementPromoUsage,
@@ -119,6 +120,7 @@ router.get('/dashboard', async (req, res) => {
       req.user.id,
       req.ip || req.connection.remoteAddress || '',
     );
+    await processMatureCopyTrades(req.user.id);
     const profile = await getProfile(req.user.id);
     const rank = profile ? await getRank(profile.rank_id) : null;
     const limit = rank?.copy_trades_limit ?? 1;
@@ -146,7 +148,16 @@ router.get('/dashboard', async (req, res) => {
 
     res.json({
       profile: profileToJson(profile, rank),
-      copyTrades: trades.map((t) => ({ id: t.id, pair: t.pair, action: t.action, amount: toNum(t.amount), profit: toNum(t.profit), status: t.status, createdAt: t.created_at })),
+      copyTrades: trades.map((t) => ({
+        id: t.id,
+        pair: t.pair,
+        action: t.action,
+        amount: toNum(t.amount),
+        profit: toNum(t.profit),
+        status: t.status,
+        createdAt: t.created_at,
+        closeAt: t.close_at,
+      })),
       copyTradesLimit: limit,
       pendingDeposits: pendingDepositsList.map((d) => ({
         id: d.id, amount: toNum(d.amount), network: d.network,
@@ -330,12 +341,22 @@ router.post('/withdrawals', async (req, res) => {
 
 router.get('/copy-trades', async (req, res) => {
   try {
+    await processMatureCopyTrades(req.user.id);
     const profile = await getProfile(req.user.id);
     const rank = profile ? await getRank(profile.rank_id) : null;
     const limit = Math.max(rank?.copy_trades_limit ?? 1, 20);
     const trades = await getCopyTrades(req.user.id, limit);
     res.json({
-      copyTrades: trades.map((t) => ({ id: t.id, pair: t.pair, action: t.action, amount: toNum(t.amount), profit: toNum(t.profit), status: t.status, createdAt: t.created_at })),
+      copyTrades: trades.map((t) => ({
+        id: t.id,
+        pair: t.pair,
+        action: t.action,
+        amount: toNum(t.amount),
+        profit: toNum(t.profit),
+        status: t.status,
+        createdAt: t.created_at,
+        closeAt: t.close_at,
+      })),
       copyTradesLimit: rank?.copy_trades_limit ?? 1,
     });
   } catch (e) {
@@ -371,24 +392,26 @@ router.post('/copy-trades/simulate', async (req, res) => {
     const pctReturn = (Math.random() * 13 - 5) / 100;
     const profit = Math.round(lotSize * pctReturn * 100) / 100;
 
-    const trade = await createCopyTrade({ user_id: req.user.id, pair, action, amount: lotSize, profit, status: 'completed' });
+    const closeAt = new Date(Date.now() + (180 + Math.floor(Math.random() * 121)) * 1000);
+    const trade = await createCopyTrade({
+      user_id: req.user.id,
+      pair,
+      action,
+      amount: lotSize,
+      profit,
+      status: 'pending',
+      close_at: closeAt,
+    });
 
     createAuditLog({
       user_id: req.user.id, action: 'copy_trade.simulate', entity_type: 'copy_trade', entity_id: trade.id,
       description: `User simulated ${action} ${pair} trade`,
-      metadata: JSON.stringify({ pair, action, amount: lotSize, profit }),
+      metadata: JSON.stringify({ pair, action, amount: lotSize, profit, closeAt }),
       ip_address: req.ip || req.connection.remoteAddress || '',
     }).catch(() => {});
 
-    const dailyPct = toNum(rank?.daily_profit_pct) / 100 || 0.02;
-    const dailyProfit = total * dailyPct;
-    await updateProfile(req.user.id, {
-      withdrawable_balance: toNum(profile.withdrawable_balance) + dailyProfit + Math.max(profit, 0),
-    });
-    const newRank = await updateUserRank(req.user.id);
-
     res.status(201).json({
-      copyTrade: { id: 'simulated', pair, action, amount: lotSize, profit, status: 'completed', createdAt: new Date() },
+      copyTrade: { id: trade.id, pair, action, amount: lotSize, profit, status: 'pending', createdAt: trade.created_at, closeAt },
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

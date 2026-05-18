@@ -92,7 +92,8 @@ CREATE TABLE IF NOT EXISTS copy_trades (
   action TEXT CHECK (action IN ('buy', 'sell')),
   amount NUMERIC DEFAULT 0,
   profit NUMERIC DEFAULT 0,
-  status TEXT DEFAULT 'completed',
+  status TEXT DEFAULT 'pending',
+  close_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
