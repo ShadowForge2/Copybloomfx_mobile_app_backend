@@ -74,7 +74,7 @@ const RANK_SEED = [
 ];
 
 async function syncDatabase() {
-  await sequelize.sync({ alter: false });
+  await sequelize.sync({ alter: true });
   const count = await Rank.count();
   if (count === 0) {
     await Rank.bulkCreate(RANK_SEED);
