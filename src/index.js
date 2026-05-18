@@ -9,6 +9,7 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import adminRoutes from './routes/admin.js';
 import supabaseRoutes from './routes/supabase.js';
+import supportRoutes from './routes/support.js';
 import { processApprovedDepositsExpiry, LOCK_DAYS } from './services/depositExpiry.js';
 
 const app = express();
@@ -49,6 +50,7 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/user', apiLimiter, userRoutes);
 app.use('/api/admin', apiLimiter, adminRoutes);
 app.use('/api/supabase', apiLimiter, supabaseRoutes);
+app.use('/api/support', apiLimiter, supportRoutes);
 
 app.get('/health', (_, res) => {
   res.status(200).json({

@@ -13,6 +13,8 @@ import Notification from './Notification.js';
 import Transaction from './Transaction.js';
 import AuditLog from './AuditLog.js';
 import Session from './Session.js';
+import SupportConversation from './SupportConversation.js';
+import SupportMessage from './SupportMessage.js';
 
 User.hasOne(Profile, { foreignKey: 'user_id' });
 Profile.belongsTo(User, { foreignKey: 'user_id' });
@@ -52,6 +54,16 @@ AuditLog.belongsTo(User, { foreignKey: 'target_user_id', as: 'target', constrain
 
 Session.belongsTo(User, { foreignKey: 'user_id', constraints: false });
 
+// Support Conversations & Messages
+User.hasMany(SupportConversation, { foreignKey: 'user_id' });
+SupportConversation.belongsTo(User, { foreignKey: 'user_id' });
+
+SupportConversation.hasMany(SupportMessage, { foreignKey: 'conversation_id' });
+SupportMessage.belongsTo(SupportConversation, { foreignKey: 'conversation_id' });
+
+User.hasMany(SupportMessage, { foreignKey: 'sender_id' });
+SupportMessage.belongsTo(User, { foreignKey: 'sender_id' });
+
 const RANK_SEED = [
   { name: 'Green Horn',    min_balance: 7,     max_balance: 49,    daily_profit_pct: 1.67, copy_trades_limit: 1, color: '#4CAF50' },
   { name: 'Student Form',  min_balance: 50,    max_balance: 100,   daily_profit_pct: 2.0,  copy_trades_limit: 2, color: '#2196F3' },
@@ -86,5 +98,5 @@ export {
   User, Profile, Rank, Deposit, Withdrawal,
   CopyTrade, DailyReward, Referral,
   PromoCode, PromoRedemption, Notification, Transaction,
-  AuditLog, Session,
+  AuditLog, Session, SupportConversation, SupportMessage,
 };

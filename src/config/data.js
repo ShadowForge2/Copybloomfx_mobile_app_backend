@@ -9,6 +9,8 @@ import {
   PromoRedemption as PromoRedemptionModel,
   Notification as NotificationModel, Transaction as TransactionModel,
   AuditLog as AuditLogModel, Session as SessionModel,
+  SupportConversation as SupportConversationModel,
+  SupportMessage as SupportMessageModel,
 } from '../models/index.js';
 
 const USE_SQLITE = process.env.USE_SQLITE === 'true';
@@ -724,6 +726,116 @@ export async function updateSession(id, data) {
   const { data: result, error } = await supabase.from('sessions').update(data).eq('id', id).select().single();
   if (error) throw error;
   return result;
+}
+
+// ---------- Support Conversations & Messages ----------
+
+export async function getOrCreateSupportConversation(userId) {
+  if (USE_SQLITE) {
+    let conv = sq(await SupportConversationModel.findOne({
+      where: { user_id: userId },
+      order: [['created_at', 'DESC']],
+    }));
+    if (!conv) {
+      conv = sq(await SupportConversationModel.create({
+        user_id: userId,
+        status: 'open',
+        last_message_at: new Date(),
+      }));
+    }
+    return conv;
+  }
+  let { data, error } = await supabase.from('support_conversations')
+    .select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(1);
+  if (error) throw error;
+  if (data && data.length > 0) return data[0];
+  const { data: created, error: createError } = await supabase.from('support_conversations')
+    .insert({ user_id: userId, status: 'open', last_message_at: new Date().toISOString() })
+    .select().single();
+  if (createError) throw createError;
+  return created;
+}
+
+export async function getSupportConversation(id) {
+  if (USE_SQLITE) {
+    return sq(await SupportConversationModel.findByPk(id));
+  }
+  const { data, error } = await supabase.from('support_conversations').select('*').eq('id', id).single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getSupportConversations(where = {}) {
+  if (USE_SQLITE) {
+    return mq(await SupportConversationModel.findAll({
+      where,
+      order: [['last_message_at', 'DESC']],
+    }));
+  }
+  let q = supabase.from('support_conversations').select('*');
+  for (const [k, v] of Object.entries(where)) q = q.eq(k, v);
+  const { data, error } = await q.order('last_message_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function updateSupportConversation(id, data) {
+  if (USE_SQLITE) {
+    await SupportConversationModel.update(data, { where: { id } });
+    return sq(await SupportConversationModel.findByPk(id));
+  }
+  const { data: result, error } = await supabase.from('support_conversations')
+    .update(data).eq('id', id).select().single();
+  if (error) throw error;
+  return result;
+}
+
+export async function getSupportMessages(conversationId) {
+  if (USE_SQLITE) {
+    return mq(await SupportMessageModel.findAll({
+      where: { conversation_id: conversationId },
+      order: [['created_at', 'ASC']],
+    }));
+  }
+  const { data, error } = await supabase.from('support_messages')
+    .select('*').eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function createSupportMessage(data) {
+  if (USE_SQLITE) {
+    return sq(await SupportMessageModel.create(data));
+  }
+  const { data: result, error } = await supabase.from('support_messages')
+    .insert(data).select().single();
+  if (error) throw error;
+  return result;
+}
+
+export async function markSupportMessageAsRead(messageId) {
+  if (USE_SQLITE) {
+    await SupportMessageModel.update({ is_read: true }, { where: { id: messageId } });
+    return true;
+  }
+  const { error } = await supabase.from('support_messages')
+    .update({ is_read: true }).eq('id', messageId);
+  if (error) throw error;
+  return true;
+}
+
+export async function countUnreadConversationMessages(conversationId) {
+  if (USE_SQLITE) {
+    return await SupportMessageModel.count({
+      where: { conversation_id: conversationId, is_read: false },
+    });
+  }
+  const { count, error } = await supabase.from('support_messages')
+    .select('*', { count: 'exact', head: true })
+    .eq('conversation_id', conversationId).eq('is_read', false);
+  if (error) throw error;
+  return count || 0;
 }
 
 // ---------- Export supabase raw clients for direct use ----------
