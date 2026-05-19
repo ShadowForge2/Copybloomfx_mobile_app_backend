@@ -1,5 +1,6 @@
 import { Op, fn, col, literal } from 'sequelize';
 import { supabase, db } from './supabase.js';
+import nodemailer from 'nodemailer';
 import {
   sequelize, syncDatabase,
   User as UserModel, Profile as ProfileModel, Rank as RankModel,
@@ -283,13 +284,52 @@ export async function countCopyTrades(userId) {
   return count || 0;
 }
 
+export async function getTodayCopyTradesSum(userId) {
+  const { getMidnightWAT } = await import('../utils/helpers.js');
+  const cutoff = getMidnightWAT();
+  if (USE_SQLITE) {
+    const trades = await CopyTradeModel.findAll({
+      where: { user_id: userId, created_at: { [Op.gte]: cutoff } },
+    });
+    return trades.reduce((s, t) => s + toNum(t.profit), 0);
+  }
+  const { data, error } = await supabase.from('copy_trades')
+    .select('profit').eq('user_id', userId).gte('created_at', cutoff.toISOString());
+  if (error) throw error;
+  return (data || []).reduce((s, t) => s + toNum(t.profit), 0);
+}
+
 export async function createCopyTrade(data) {
   if (USE_SQLITE) {
     return sq(await CopyTradeModel.create(data));
   }
-  const { data: result, error } = await supabase.from('copy_trades').insert(data).select().single();
-  if (error) throw error;
-  return result;
+  // Defensive insert: some DB instances may have a stricter CHECK on `status`.
+  // Normalize common status input and retry without `status` if the DB rejects it.
+  const safeData = { ...data };
+  if (safeData.status && typeof safeData.status === 'string') {
+    // normalize common variants to 'pending' when creating
+    const s = safeData.status.toLowerCase();
+    if (['pending', 'approved', 'rejected', 'completed', 'active'].includes(s)) {
+      safeData.status = s;
+    } else {
+      delete safeData.status;
+    }
+  }
+
+  let insertRes = await supabase.from('copy_trades').insert(safeData).select().single();
+  if (insertRes.error) {
+    const msg = (insertRes.error?.message || '').toLowerCase();
+    if (msg.includes('check') && msg.includes('status') && msg.includes('copy_trade')) {
+      // retry without status field entirely (let DB default apply)
+      const retryData = { ...safeData };
+      delete retryData.status;
+      const { data: r2, error: err2 } = await supabase.from('copy_trades').insert(retryData).select().single();
+      if (err2) throw err2;
+      return r2;
+    }
+    throw insertRes.error;
+  }
+  return insertRes.data;
 }
 
 export async function getPendingCopyTradesToClose(userId) {
@@ -325,7 +365,7 @@ export async function updateCopyTradesStatus(ids, status) {
 export async function updateUserRank(userId) {
   const profile = await getProfile(userId);
   if (!profile) return null;
-  const total = toNum(profile.locked_balance) + toNum(profile.withdrawable_balance);
+  const total = toNum(profile.locked_balance);
   if (total <= 0) {
     if (profile.rank_id !== null) await updateProfile(userId, { rank_id: null });
     return null;
@@ -668,8 +708,49 @@ export async function createNotification(userId, title, body, type = 'info') {
   if (USE_SQLITE) {
     return sq(await NotificationModel.create(data));
   }
-  const { data: result, error } = await supabase.from('notifications').insert(data).select().single();
-  if (error) throw error;
+  // Try regular insert first. If the DB doesn't have a `type` column
+  // (e.g. running older schema), fall back to inserting without it.
+  let result;
+  let insertRes = await supabase.from('notifications').insert(data).select().single();
+  if (insertRes.error) {
+    const msg = (insertRes.error?.message || '').toLowerCase();
+    if (msg.includes('column "type"') || msg.includes('column \"type\" does not exist') || msg.includes('unknown column')) {
+      const { data: r2, error: err2 } = await supabase.from('notifications')
+        .insert({ user_id: userId, title, body, is_read: false }).select().single();
+      if (err2) throw err2;
+      result = r2;
+    } else {
+      throw insertRes.error;
+    }
+  } else {
+    result = insertRes.data;
+  }
+  // Send an email copy if SMTP is configured and the user has an email address.
+  try {
+    const smtpHost = process.env.SMTP_HOST;
+    if (smtpHost) {
+      const user = await getUser(userId).catch(() => null);
+      const to = user?.email;
+      if (to) {
+        const transporter = nodemailer.createTransport({
+          host: smtpHost,
+          port: parseInt(process.env.SMTP_PORT || '587', 10),
+          secure: (process.env.SMTP_SECURE === 'true'),
+          auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+        });
+        const mailOptions = {
+          from: process.env.EMAIL_FROM || process.env.SMTP_USER || 'no-reply@bloomfx.com',
+          to,
+          subject: title,
+          text: body,
+        };
+        // send but don't block the main flow
+        transporter.sendMail(mailOptions).catch(() => {});
+      }
+    }
+  } catch (_) {
+    // ignore email errors
+  }
   return result;
 }
 

@@ -3,7 +3,7 @@ import {
   db, getUser, getUserBy, getProfile, updateProfile, getRank, getAllRanks,
   getDeposit, getDeposits, createDeposit,
   getWithdrawals, createWithdrawal,
-  getCopyTrades, countCopyTrades, createCopyTrade,
+  getCopyTrades, countCopyTrades, getTodayCopyTradesSum, createCopyTrade,
   processMatureCopyTrades,
   getLastDailyReward, createDailyReward,
   getPromoCodeByCode, getPromoRedemption, createPromoRedemption,
@@ -39,7 +39,7 @@ function refereeHasApprovedDeposit(deposits) {
 async function updateUserRank(userId) {
   const profile = await getProfile(userId);
   if (!profile) return null;
-  const total = toNum(profile.locked_balance) + toNum(profile.withdrawable_balance);
+  const total = toNum(profile.locked_balance);
   if (total <= 0) {
     if (profile.rank_id !== null) await updateProfile(userId, { rank_id: null });
     return null;
@@ -133,7 +133,7 @@ router.get('/dashboard', async (req, res) => {
     ]);
 
     const canClaimDaily = !lastReward || !isSameDay(new Date(lastReward.claimed_at), new Date());
-    const total = toNum(profile?.locked_balance) + toNum(profile?.withdrawable_balance);
+    const total = toNum(profile?.locked_balance);
     let currentRankId = null;
     if (total > 0) {
       for (const r of ranks) {
@@ -379,7 +379,29 @@ router.post('/copy-trades/simulate', async (req, res) => {
     const existing = await countCopyTrades(req.user.id);
     if (existing >= limit) return res.status(400).json({ error: 'Copy trade limit reached for rank — resets at 12AM WAT' });
 
-    const total = toNum(profile.locked_balance) + toNum(profile.withdrawable_balance);
+    const total = toNum(profile.locked_balance);
+    const cutoff = getMidnightWAT();
+    const dateKey = cutoff.getTime();
+    let flexHash = 0;
+    const idStr = String(req.user.id);
+    for (let i = 0; i < idStr.length; i++) {
+      flexHash = ((flexHash << 5) - flexHash) + idStr.charCodeAt(i);
+      flexHash |= 0;
+    }
+    const dailyFlex = ((Math.abs(flexHash + dateKey) % 1001) / 10000) - 0.05;
+    const dailyProfit = Math.max(0, total * (toNum(rank?.daily_profit_pct) / 100) + dailyFlex);
+    const basePerClick = dailyProfit / limit;
+    const todayProfitSum = await getTodayCopyTradesSum(req.user.id);
+    const isLastClick = existing + 1 >= limit;
+
+    const variance = (Math.random() * 0.2) - 0.1;
+    let profit = +(basePerClick + variance).toFixed(2);
+
+    if (isLastClick) {
+      const correction = +(dailyProfit - (todayProfitSum + profit)).toFixed(2);
+      profit = +(profit + correction).toFixed(2);
+    }
+
     let lotSize;
     if (total < 100) lotSize = +(0.01 + Math.random() * 0.49).toFixed(2);
     else if (total < 500) lotSize = +(0.5 + Math.random() * 1.5).toFixed(2);
@@ -389,8 +411,6 @@ router.post('/copy-trades/simulate', async (req, res) => {
 
     const pair = PAIRS[Math.floor(Math.random() * PAIRS.length)];
     const action = Math.random() > 0.5 ? 'buy' : 'sell';
-    const pctReturn = (Math.random() * 13 - 5) / 100;
-    const profit = Math.round(lotSize * pctReturn * 100) / 100;
 
     const closeAt = new Date(Date.now() + (180 + Math.floor(Math.random() * 121)) * 1000);
     const trade = await createCopyTrade({

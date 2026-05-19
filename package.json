@@ -7,10 +7,12 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "migrate": "node src/migrate.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",
+    "nodemailer": "^6.9.3",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",

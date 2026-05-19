@@ -42,7 +42,7 @@ function profileToJson(p, rank) {
 async function updateUserRank(userId) {
   const profile = await getProfile(userId);
   if (!profile) return null;
-  const total = toNum(profile.locked_balance) + toNum(profile.withdrawable_balance);
+  const total = toNum(profile.locked_balance);
   if (total <= 0) {
     if (profile.rank_id !== null) await updateProfile(userId, { rank_id: null });
     return null;
