@@ -245,14 +245,16 @@ router.post('/deposits', async (req, res) => {
     const wallet = assignWallet(network, null);
     if (!wallet) return res.status(500).json({ error: 'No wallet available for this network' });
 
+    const [refProfile, profile] = await Promise.all([
+      referrerCode ? getProfileByReferralCode(referrerCode.trim()) : Promise.resolve(null),
+      getProfile(req.user.id)
+    ]);
+
     let referrerId = null;
-    if (referrerCode) {
-      const refProfile = await getProfileByReferralCode(referrerCode.trim());
-      if (refProfile && refProfile.user_id !== req.user.id) referrerId = refProfile.user_id;
-    }
-    if (!referrerId) {
-      const profile = await getProfile(req.user.id);
-      if (profile && profile.referred_by) referrerId = profile.referred_by;
+    if (refProfile && refProfile.user_id !== req.user.id) {
+      referrerId = refProfile.user_id;
+    } else if (profile && profile.referred_by) {
+      referrerId = profile.referred_by;
     }
 
     const createdAt = new Date();
@@ -293,16 +295,19 @@ router.post('/withdrawals', async (req, res) => {
     if (isNaN(amt) || amt < MIN_WITHDRAWAL) return res.status(400).json({ error: `Minimum withdrawal $${MIN_WITHDRAWAL}` });
     if (!NETWORKS.includes(network)) return res.status(400).json({ error: 'Invalid network' });
 
-    const profile = await getProfile(req.user.id);
+    const [profile, deposits, withdrawals] = await Promise.all([
+      getProfile(req.user.id),
+      getDeposits({ user_id: req.user.id, status: 'approved' }, { limit: 1 }),
+      getWithdrawals({ user_id: req.user.id }, { limit: 20 })
+    ]);
+
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
     if (amt > toNum(profile.withdrawable_balance)) return res.status(400).json({ error: 'Insufficient withdrawable balance' });
 
-    const deposits = await getDeposits({ user_id: req.user.id, status: 'approved' }, { limit: 1 });
     if (deposits.length === 0) {
       return res.status(400).json({ error: 'At least one approved deposit required to withdraw' });
     }
 
-    const withdrawals = await getWithdrawals({ user_id: req.user.id }, { limit: 20 });
     const last = withdrawals.find(w => w.status !== 'rejected');
     if (last && last.created_at && Date.now() - new Date(last.created_at).getTime() < 86400000) {
       return res.status(400).json({ error: 'One withdrawal per 24 hours' });
@@ -578,7 +583,12 @@ router.post('/paystack/verify', async (req, res) => {
     const { reference } = req.body;
     if (!reference) return res.status(400).json({ error: 'Reference required' });
 
-    const result = await paystackVerify(reference);
+    const [result, profile, existingDeposits] = await Promise.all([
+      paystackVerify(reference),
+      getProfile(req.user.id),
+      getDeposits({ user_id: req.user.id, network: 'Paystack', reference })
+    ]);
+
     if (!result.status || result.data.status !== 'success') {
       return res.json({ status: 'failed', reference, message: 'Payment not completed' });
     }
@@ -589,48 +599,51 @@ router.post('/paystack/verify', async (req, res) => {
       return res.status(400).json({ error: 'Payment amount below minimum deposit' });
     }
 
-    const profile = await getProfile(req.user.id);
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-    const existingDeposits = await getDeposits({ user_id: req.user.id, status: 'approved' });
-    const alreadyCredited = existingDeposits.some((d) => d.network === 'Paystack' && toNum(d.amount) === amountInUSD);
+    const alreadyCredited = existingDeposits.length > 0;
     if (alreadyCredited) {
       return res.json({ status: 'already_credited', reference, message: 'Payment already processed' });
     }
 
     const wallet = assignWallet('USDT BEP20', null) || 'Paystack';
     const paystackApprovedAt = new Date();
-    const paystackDeposit = await createDeposit({
-      user_id: req.user.id, amount: amountInUSD, network: 'Paystack',
-      wallet_address: wallet, status: 'approved', approved_at: paystackApprovedAt,
-      expires_at: approvedLockExpiresAt(paystackApprovedAt),
-    });
-
-    await updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + amountInUSD });
-    await updateUserRank(req.user.id);
-
-    const referrerId = await resolveReferrerUserId(profile.referred_by);
-    if (referrerId && referrerId !== req.user.id) {
-      const commission = await payReferralCommission({
-        referrerId,
-        refereeId: req.user.id,
-        depositId: paystackDeposit.id,
-        depositAmount: amountInUSD,
-        walletNetwork: 'Paystack',
-      });
-      if (commission.paid) await updateUserRank(referrerId);
-    }
-
-    createNotification(req.user.id, 'Deposit Approved', 'Your deposit has been approved and credited to your tradable balance. You can now start copy trading.', 'success').catch(() => {});
-
-    createAuditLog({
-      user_id: req.user.id, action: 'payment.paystack',
-      description: `Paystack payment $${amountInUSD} verified and credited`,
-      metadata: JSON.stringify({ amount: amountInUSD, reference }),
-      ip_address: req.ip || req.connection.remoteAddress || '',
-    }).catch(() => {});
+    
+    const [paystackDeposit] = await Promise.all([
+      createDeposit({
+        user_id: req.user.id, amount: amountInUSD, network: 'Paystack',
+        wallet_address: wallet, status: 'approved', approved_at: paystackApprovedAt,
+        expires_at: approvedLockExpiresAt(paystackApprovedAt),
+        reference,
+      }),
+      updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + amountInUSD })
+    ]);
 
     res.json({ status: 'success', reference, usd_amount: amountInUSD, message: `Payment verified and credited $${amountInUSD}` });
+
+    Promise.resolve().then(async () => {
+      await updateUserRank(req.user.id);
+      const referrerId = await resolveReferrerUserId(profile.referred_by);
+      if (referrerId && referrerId !== req.user.id) {
+        const commission = await payReferralCommission({
+          referrerId,
+          refereeId: req.user.id,
+          depositId: paystackDeposit.id,
+          depositAmount: amountInUSD,
+          walletNetwork: 'Paystack',
+        });
+        if (commission.paid) await updateUserRank(referrerId);
+      }
+
+      createNotification(req.user.id, 'Deposit Approved', 'Your deposit has been approved and credited to your tradable balance. You can now start copy trading.', 'success').catch(() => {});
+
+      createAuditLog({
+        user_id: req.user.id, action: 'payment.paystack',
+        description: `Paystack payment $${amountInUSD} verified and credited`,
+        metadata: JSON.stringify({ amount: amountInUSD, reference }),
+        ip_address: req.ip || req.connection.remoteAddress || '',
+      }).catch(() => {});
+    }).catch((err) => console.error('Background processing error in /paystack/verify:', err));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -691,8 +704,8 @@ router.post('/paystack/callback', async (req, res) => {
     const profile = await getProfile(user.id);
     if (!profile) return res.status(200).json({ status: 'no_profile' });
 
-    const existingDeposits = await getDeposits({ user_id: user.id, status: 'approved' });
-    const alreadyCredited = existingDeposits.some((d) => d.network === 'Paystack' && toNum(d.amount) === amountInUSD);
+    const existingDeposits = await getDeposits({ user_id: user.id, network: 'Paystack', reference });
+    const alreadyCredited = existingDeposits.length > 0;
     if (alreadyCredited) {
       return res.status(200).json({ status: 'already_credited' });
     }

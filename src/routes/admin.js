@@ -80,16 +80,15 @@ async function withFallback(promise, fallback) {
 
 router.get('/dashboard', async (req, res) => {
   try {
-    const [totalUsers, totalDepositAmount, totalWithdrawalAmount, pendingDeps, pendingWiths] = await Promise.all([
+    const [totalUsers, totalDepositAmount, totalWithdrawalAmount, pendingDeps, pendingWiths, flagged, banned] = await Promise.all([
       withFallback(countUsers(), 0),
       withFallback(sumDeposits({ status: 'approved' }), 0),
       withFallback(sumWithdrawals({ status: 'approved' }), 0),
       withFallback(getDeposits({ status: 'pending' }), []),
       withFallback(getWithdrawals({ status: 'pending' }), []),
+      withFallback(countUsers({ is_flagged: true }), 0),
+      withFallback(countUsers({ is_banned: true }), 0),
     ]);
-
-    const flagged = await withFallback(countUsers({ is_flagged: true }), 0);
-    const banned = await withFallback(countUsers({ is_banned: true }), 0);
 
     res.json({
       totalUsers,
@@ -114,9 +113,17 @@ router.get('/deposits', async (req, res) => {
     if (req.query.status) where.status = req.query.status;
     const deposits = await withFallback(getDeposits(where), []);
 
+    const userCache = new Map();
     const withUsers = await Promise.all(deposits.map(async (d) => {
       let user = null;
-      try { user = await getUser(d.user_id); } catch (_) {}
+      try { 
+        if (userCache.has(d.user_id)) {
+          user = userCache.get(d.user_id);
+        } else {
+          user = await getUser(d.user_id); 
+          userCache.set(d.user_id, user);
+        }
+      } catch (_) {}
       return {
         id: d.id, userId: d.user_id, amount: toNum(d.amount),
         network: d.network, walletAddress: d.wallet_address, status: d.status,
@@ -217,9 +224,17 @@ router.get('/withdrawals', async (req, res) => {
     if (req.query.status) where.status = req.query.status;
     const withdrawals = await withFallback(getWithdrawals(where), []);
 
+    const userCache = new Map();
     const withUsers = await Promise.all(withdrawals.map(async (w) => {
       let user = null;
-      try { user = await getUser(w.user_id); } catch (_) {}
+      try { 
+        if (userCache.has(w.user_id)) {
+          user = userCache.get(w.user_id);
+        } else {
+          user = await getUser(w.user_id); 
+          userCache.set(w.user_id, user);
+        }
+      } catch (_) {}
       return {
         id: w.id, userId: w.user_id, amount: toNum(w.amount),
         network: w.network, walletAddress: w.wallet_address, status: w.status,
@@ -410,10 +425,11 @@ router.get('/users', async (req, res) => {
     if (filter === 'banned') where.is_banned = true;
 
     const users = await withFallback(getUsersForAdmin(where), []);
+    const allRanks = await withFallback(getAllRanks(), []);
 
     const withProfiles = await Promise.all(users.map(async (u) => {
       const profile = await getProfile(u.id).catch(() => null);
-      const rank = profile ? await getRank(profile.rank_id).catch(() => null) : null;
+      const rank = profile ? allRanks.find(r => r.id === profile.rank_id) : null;
       return {
         id: u.id, username: u.username, email: u.email,
         isFlagged: u.is_flagged, isBanned: u.is_banned, lastLoginIp: u.last_login_ip,
