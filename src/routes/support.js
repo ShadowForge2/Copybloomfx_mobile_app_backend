@@ -9,6 +9,8 @@ import {
   createSupportMessage,
   markSupportMessageAsRead,
   countUnreadConversationMessages,
+  createNotification,
+  getUsers,
 } from '../config/data.js';
 
 const router = Router();
@@ -93,7 +95,10 @@ router.post('/conversations/:conversationId/messages', async (req, res) => {
     }
 
     if (conversation.status === 'closed') {
-      return res.status(400).json({ error: 'Conversation is closed' });
+      await updateSupportConversation(conversationId, {
+        status: 'open',
+        updated_at: new Date().toISOString(),
+      });
     }
 
     if (conversation.user_id !== senderId && userRole !== 'admin') {
@@ -115,6 +120,28 @@ router.post('/conversations/:conversationId/messages', async (req, res) => {
       last_message_at: supportMessage.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
+
+    // Fire in-app notification
+    if (senderType === 'admin') {
+      createNotification(
+        conversation.user_id,
+        'Support Reply',
+        'Admin replied to your support ticket',
+        'info',
+      ).catch(() => {});
+    } else {
+      try {
+        const admins = await getUsers({ role: 'admin' });
+        for (const admin of admins) {
+          createNotification(
+            admin.id,
+            'New Support Message',
+            `User ${conversation.user_id.substring(0, 8)} sent a message`,
+            'info',
+          ).catch(() => {});
+        }
+      } catch (_) {}
+    }
 
     res.json({ message: supportMessage });
   } catch (e) {

@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import {
   db, getUser, getUserBy, getProfile, updateProfile, getRank, getAllRanks,
-  getDeposit, getDeposits, createDeposit,
-  getWithdrawals, createWithdrawal,
+  getDeposit, getDeposits, createDeposit, sumDeposits,
+  getWithdrawals, createWithdrawal, sumWithdrawals,
   getCopyTrades, countCopyTrades, getTodayCopyTradesSum, createCopyTrade,
   processMatureCopyTrades,
   getLastDailyReward, createDailyReward,
@@ -36,15 +36,18 @@ function refereeHasApprovedDeposit(deposits) {
   return deposits.some((d) => d.status === 'approved' && d.network !== 'Referral Bonus');
 }
 
-async function updateUserRank(userId) {
-  const profile = await getProfile(userId);
+async function updateUserRank(userId, preFetchedProfile = null, preFetchedRanks = null) {
+  const profile = preFetchedProfile || await getProfile(userId);
   if (!profile) return null;
   const total = toNum(profile.locked_balance);
   if (total <= 0) {
-    if (profile.rank_id !== null) await updateProfile(userId, { rank_id: null });
+    if (profile.rank_id !== null) {
+      await updateProfile(userId, { rank_id: null });
+      if (preFetchedProfile) preFetchedProfile.rank_id = null;
+    }
     return null;
   }
-  const ranks = await getAllRanks();
+  const ranks = preFetchedRanks || await getAllRanks();
   let newRankId = null;
   for (const r of ranks) {
     if (total >= toNum(r.min_balance)) {
@@ -54,8 +57,11 @@ async function updateUserRank(userId) {
       }
     }
   }
-  if (newRankId !== profile.rank_id) await updateProfile(userId, { rank_id: newRankId });
-  return newRankId ? getRank(newRankId) : null;
+  if (newRankId !== profile.rank_id) {
+    await updateProfile(userId, { rank_id: newRankId });
+    if (preFetchedProfile) preFetchedProfile.rank_id = newRankId;
+  }
+  return newRankId ? ranks.find(r => r.id === newRankId) : null;
 }
 
 function rankMax(r) {
@@ -115,36 +121,26 @@ router.put('/profile', async (req, res) => {
 
 router.get('/dashboard', async (req, res) => {
   try {
-    await updateUserRank(req.user.id);
-    await processUserDepositsExpiry(
-      req.user.id,
-      req.ip || req.connection.remoteAddress || '',
-    );
-    await processMatureCopyTrades(req.user.id);
-    const profile = await getProfile(req.user.id);
-    const rank = profile ? await getRank(profile.rank_id) : null;
-    const limit = rank?.copy_trades_limit ?? 1;
-
-    const [trades, pendingDepositsList, lastReward, ranks] = await Promise.all([
-      getCopyTrades(req.user.id, Math.max(limit, 20)),
-      getDeposits({ user_id: req.user.id, status: 'pending' }),
-      getLastDailyReward(req.user.id),
-      getAllRanks(),
+    await Promise.all([
+      processUserDepositsExpiry(req.user.id, req.ip || req.connection.remoteAddress || ''),
+      processMatureCopyTrades(req.user.id)
     ]);
 
+    const [profile, ranks, lastReward, pendingDepositsList] = await Promise.all([
+      getProfile(req.user.id),
+      getAllRanks(),
+      getLastDailyReward(req.user.id),
+      getDeposits({ user_id: req.user.id, status: 'pending' })
+    ]);
+
+    await updateUserRank(req.user.id, profile, ranks);
+
+    const rank = profile ? ranks.find(r => r.id === profile.rank_id) : null;
+    const limit = rank?.copy_trades_limit ?? 1;
+    const trades = await getCopyTrades(req.user.id, Math.max(limit, 20));
+
     const canClaimDaily = !lastReward || !isSameDay(new Date(lastReward.claimed_at), new Date());
-    const total = toNum(profile?.locked_balance);
-    let currentRankId = null;
-    if (total > 0) {
-      for (const r of ranks) {
-        if (total >= toNum(r.min_balance)) {
-          if (r.max_balance === null || total <= toNum(r.max_balance)) {
-            currentRankId = r.id;
-            break;
-          }
-        }
-      }
-    }
+    const currentRankId = profile ? profile.rank_id : null;
 
     res.json({
       profile: profileToJson(profile, rank),
@@ -211,20 +207,20 @@ router.get('/finance', async (req, res) => {
       req.user.id,
       req.ip || req.connection.remoteAddress || '',
     );
-    const profile = await getProfile(req.user.id);
-    const rank = profile ? await getRank(profile.rank_id) : null;
 
-    const [deposits, withdrawals] = await Promise.all([
-      getDeposits({ user_id: req.user.id }),
-      getWithdrawals({ user_id: req.user.id }),
+    const [profile, deposits, withdrawals, totalDeposits, pendingDeposits, totalWithdrawals, dailyRows, ranks] = await Promise.all([
+      getProfile(req.user.id),
+      getDeposits({ user_id: req.user.id }, { limit: 100 }),
+      getWithdrawals({ user_id: req.user.id }, { limit: 100 }),
+      sumDeposits({ user_id: req.user.id, status: 'approved' }),
+      sumDeposits({ user_id: req.user.id, status: 'pending' }),
+      sumWithdrawals({ user_id: req.user.id, status: 'approved' }),
+      db.from('daily_rewards').select('amount').eq('user_id', req.user.id),
+      getAllRanks(),
     ]);
 
-    const totalDeposits = deposits.filter((d) => d.status === 'approved').reduce((s, d) => s + toNum(d.amount), 0);
-    const pendingDeposits = deposits.filter((d) => d.status === 'pending').reduce((s, d) => s + toNum(d.amount), 0);
-    const totalWithdrawals = withdrawals.filter((w) => w.status === 'approved').reduce((s, w) => s + toNum(w.amount), 0);
+    const rank = profile ? ranks.find(r => r.id === profile.rank_id) : null;
     const referralBonus = toNum(profile?.referral_earnings) ?? 0;
-
-    const { data: dailyRows } = await db.from('daily_rewards').select('amount').eq('user_id', req.user.id);
     const dailyRewards = (dailyRows || []).reduce((s, r) => s + toNum(r.amount), 0);
 
     res.json({
@@ -301,13 +297,13 @@ router.post('/withdrawals', async (req, res) => {
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
     if (amt > toNum(profile.withdrawable_balance)) return res.status(400).json({ error: 'Insufficient withdrawable balance' });
 
-    const deposits = await getDeposits({ user_id: req.user.id, status: 'approved' });
+    const deposits = await getDeposits({ user_id: req.user.id, status: 'approved' }, { limit: 1 });
     if (deposits.length === 0) {
       return res.status(400).json({ error: 'At least one approved deposit required to withdraw' });
     }
 
-    const withdrawals = await getWithdrawals({ user_id: req.user.id });
-    const last = withdrawals[0];
+    const withdrawals = await getWithdrawals({ user_id: req.user.id }, { limit: 20 });
+    const last = withdrawals.find(w => w.status !== 'rejected');
     if (last && last.created_at && Date.now() - new Date(last.created_at).getTime() < 86400000) {
       return res.status(400).json({ error: 'One withdrawal per 24 hours' });
     }
@@ -370,7 +366,7 @@ router.post('/copy-trades/simulate', async (req, res) => {
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
     if (toNum(profile.locked_balance) <= 0) {
-      return res.status(400).json({ error: 'Locked balance required for copy trading' });
+      return res.status(400).json({ error: 'Tradable balance required. Please make a deposit.' });
     }
 
     const rank = await getRank(profile.rank_id);
@@ -412,7 +408,7 @@ router.post('/copy-trades/simulate', async (req, res) => {
     const pair = PAIRS[Math.floor(Math.random() * PAIRS.length)];
     const action = Math.random() > 0.5 ? 'buy' : 'sell';
 
-    const closeAt = new Date(Date.now() + (180 + Math.floor(Math.random() * 121)) * 1000);
+    const closeAt = new Date(Date.now() + (120 + Math.floor(Math.random() * 181)) * 1000);
     const trade = await createCopyTrade({
       user_id: req.user.id,
       pair,
@@ -452,7 +448,7 @@ router.post('/promo/redeem', async (req, res) => {
 
     const usageCount = promo.usage_count || 0;
     if (promo.usage_limit != null && usageCount >= promo.usage_limit) {
-      return res.status(400).json({ error: 'Promo code usage limit reached' });
+      return res.status(400).json({ error: 'Promo code expired' });
     }
 
     const already = await getPromoRedemption(req.user.id, promo.id);
@@ -463,7 +459,7 @@ router.post('/promo/redeem', async (req, res) => {
 
     const reserved = await incrementPromoUsageIfBelowLimit(promo.id, usageCount, promo.usage_limit);
     if (!reserved) {
-      return res.status(400).json({ error: 'Promo code usage limit reached' });
+      return res.status(400).json({ error: 'Promo code expired' });
     }
 
     let redemption;

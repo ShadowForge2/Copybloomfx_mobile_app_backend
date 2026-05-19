@@ -167,13 +167,17 @@ export async function getDeposit(id) {
   return data;
 }
 
-export async function getDeposits(where = {}) {
+export async function getDeposits(where = {}, opts = {}) {
   if (USE_SQLITE) {
-    return mq(await DepositModel.findAll({ where, order: [['created_at', 'DESC']] }));
+    const q = { where, order: [['created_at', 'DESC']] };
+    if (opts.limit) q.limit = opts.limit;
+    return mq(await DepositModel.findAll(q));
   }
   let q = supabase.from('deposits').select('*');
   for (const [k, v] of Object.entries(where)) q = q.eq(k, v);
-  const { data, error } = await q.order('created_at', { ascending: false });
+  q = q.order('created_at', { ascending: false });
+  if (opts.limit) q = q.limit(opts.limit);
+  const { data, error } = await q;
   if (error) throw error;
   return data || [];
 }
@@ -226,13 +230,17 @@ export async function getWithdrawal(id) {
   return data;
 }
 
-export async function getWithdrawals(where = {}) {
+export async function getWithdrawals(where = {}, opts = {}) {
   if (USE_SQLITE) {
-    return mq(await WithdrawalModel.findAll({ where, order: [['created_at', 'DESC']] }));
+    const q = { where, order: [['created_at', 'DESC']] };
+    if (opts.limit) q.limit = opts.limit;
+    return mq(await WithdrawalModel.findAll(q));
   }
   let q = supabase.from('withdrawals').select('*');
   for (const [k, v] of Object.entries(where)) q = q.eq(k, v);
-  const { data, error } = await q.order('created_at', { ascending: false });
+  q = q.order('created_at', { ascending: false });
+  if (opts.limit) q = q.limit(opts.limit);
+  const { data, error } = await q;
   if (error) throw error;
   return data || [];
 }
@@ -934,6 +942,7 @@ export async function updateSession(id, data) {
 
 export async function getOrCreateSupportConversation(userId) {
   if (USE_SQLITE) {
+    // One continuous ticket per user — reuse the latest conversation regardless of status
     let conv = sq(await SupportConversationModel.findOne({
       where: { user_id: userId },
       order: [['created_at', 'DESC']],

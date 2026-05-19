@@ -1,0 +1,5 @@
+-- This migration is not applicable because the backend uses JWT authentication
+-- with a service role key, which bypasses RLS. The backend properly filters
+-- by user_id at the application level in data.js.
+-- Data bleed is likely due to client-side caching in the Flutter app.
+-- See Flutter app fixes for the actual solution.
