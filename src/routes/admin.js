@@ -171,7 +171,7 @@ router.post('/deposits/:id/approve', async (req, res) => {
     await updateUserRank(d.user_id);
     if (d.referrer_id) await updateUserRank(d.referrer_id);
 
-    createNotification(d.user_id, 'Deposit Approved', 'Your deposit has been approved and credited to your tradable balance. You can now start copy trading.', 'success').catch(() => {});
+    createNotification(d.user_id, 'Deposit Approved', `Your deposit of $${toNum(d.amount).toFixed(2)} has been approved and credited to your tradable balance. You can now start copy trading.`, 'success').catch(() => {});
 
     createAuditLog({
       user_id: req.user.id, target_user_id: d.user_id, action: 'deposit.approve',

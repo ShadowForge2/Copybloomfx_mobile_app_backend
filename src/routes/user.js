@@ -266,7 +266,7 @@ router.post('/deposits', async (req, res) => {
     });
     assignWallet(network, d.id);
 
-    createNotification(req.user.id, 'Deposit Pending', 'Your deposit is currently being reviewed and will be credited to your tradable balance once approved.', 'info').catch(() => {});
+    createNotification(req.user.id, 'Deposit Pending', `Your deposit of $${amt.toFixed(2)} is currently being reviewed and will be credited to your tradable balance once approved.`, 'info').catch(() => {});
 
     createAuditLog({
       user_id: req.user.id, action: 'deposit.create', entity_type: 'deposit', entity_id: d.id,
@@ -635,7 +635,7 @@ router.post('/paystack/verify', async (req, res) => {
         if (commission.paid) await updateUserRank(referrerId);
       }
 
-      createNotification(req.user.id, 'Deposit Approved', 'Your deposit has been approved and credited to your tradable balance. You can now start copy trading.', 'success').catch(() => {});
+      createNotification(req.user.id, 'Deposit Approved', `Your deposit of $${amountInUSD.toFixed(2)} has been approved and credited to your tradable balance. You can now start copy trading.`, 'success').catch(() => {});
 
       createAuditLog({
         user_id: req.user.id, action: 'payment.paystack',
@@ -733,7 +733,7 @@ router.post('/paystack/callback', async (req, res) => {
       if (commission.paid) await updateUserRank(referrerId);
     }
 
-    createNotification(user.id, 'Deposit Approved', 'Your deposit has been approved and credited to your tradable balance. You can now start copy trading.', 'success').catch(() => {});
+    createNotification(user.id, 'Deposit Approved', `Your deposit of $${amountInUSD.toFixed(2)} has been approved and credited to your tradable balance. You can now start copy trading.`, 'success').catch(() => {});
 
     res.status(200).json({ status: 'success', usd_amount: amountInUSD });
   } catch (e) {
