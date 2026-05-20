@@ -148,12 +148,24 @@ export async function getRank(id) {
 }
 
 export async function getAllRanks() {
+  let rawRanks = [];
   if (USE_SQLITE) {
-    return mq(await RankModel.findAll({ order: [['min_balance', 'ASC']] }));
+    rawRanks = mq(await RankModel.findAll({ order: [['min_balance', 'ASC']] }));
+  } else {
+    const { data, error } = await supabase.from('ranks').select('*').order('min_balance', { ascending: true });
+    if (error) throw error;
+    rawRanks = data || [];
   }
-  const { data, error } = await supabase.from('ranks').select('*').order('min_balance', { ascending: true });
-  if (error) throw error;
-  return data || [];
+
+  const uniqueRanks = [];
+  const seen = new Set();
+  for (const r of rawRanks) {
+    if (!seen.has(r.name)) {
+      seen.add(r.name);
+      uniqueRanks.push(r);
+    }
+  }
+  return uniqueRanks;
 }
 
 // ---------- Deposits ----------
