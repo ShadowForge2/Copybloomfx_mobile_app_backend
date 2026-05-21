@@ -112,6 +112,27 @@ async function syncDatabase() {
   } catch (e) {
     console.error('[DB] Error verifying profiles schema:', e.message);
   }
+
+  // Ensure color column exists on ranks table (safe migration)
+  try {
+    await sequelize.query(`ALTER TABLE ranks ADD COLUMN "color" TEXT DEFAULT '#6366f1'`);
+    console.log('[DB] Added column \'color\' to ranks table');
+  } catch (e) {
+    if (e.message && e.message.includes('duplicate column name')) {
+      console.log('[DB] Column \'color\' already exists in ranks table (verified)');
+    } else {
+      console.error('[DB] Error adding column \'color\' to ranks:', e.message);
+    }
+  }
+
+  // Update existing ranks with correct colors if they have the default/null color
+  for (const seed of RANK_SEED) {
+    await sequelize.query(
+      `UPDATE ranks SET color = ? WHERE name = ? AND (color IS NULL OR color = '#6366f1' OR color = '')`,
+      { replacements: [seed.color, seed.name] },
+    );
+  }
+
   const count = await Rank.count();
   if (count === 0) {
     await Rank.bulkCreate(RANK_SEED);

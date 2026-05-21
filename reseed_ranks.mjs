@@ -26,7 +26,7 @@ async function main() {
   const ranks = await Rank.findAll({ order: [['min_balance', 'ASC']] });
   for (const r of ranks) {
     const maxStr = r.max_balance === null ? 'unlimited' : String(r.max_balance);
-    console.log('  ' + r.id + ': ' + r.name + ' | $' + r.min_balance + '-' + maxStr + ' | ' + r.daily_profit_pct + '% | ' + r.copy_trades_limit + ' trades');
+    console.log('  ' + r.id + ': ' + r.name + ' | $' + r.min_balance + '-' + maxStr + ' | ' + r.daily_profit_pct + '% | ' + r.copy_trades_limit + ' trades' + ' | color: ' + (r.color || '#6366f1'));
   }
   
   await sequelize.close();
