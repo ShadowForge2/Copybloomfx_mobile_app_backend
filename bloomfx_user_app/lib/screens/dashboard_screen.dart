@@ -9,6 +9,8 @@ import '../providers/notification_provider.dart';
 import '../models/notification_model.dart';
 import '../services/investment_logic.dart';
 import '../providers/theme_provider.dart';
+import '../widgets/copy_trading/copy_trades_hub.dart';
+import '../widgets/notification_ui.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -101,6 +103,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         if (dashboardData?.pendingDeposits.isNotEmpty == true)
                           const SizedBox(height: 16),
 
+                        const SizedBox(height: 24),
+
                         _buildBalancesSection(dashboardData, c),
                         const SizedBox(height: 24),
 
@@ -112,10 +116,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                         Consumer<DashboardProvider>(
                           builder: (context, dashboardProvider, child) {
-                            return _buildCopyTradesSection(
-                              dashboardData,
-                              dashboardProvider,
-                              c,
+                            return CopyTradesHub(
+                              dashboardData: dashboardData,
+                              isSimulating: dashboardProvider.isSimulating,
+                              onPlaceTrade: _simulateCopyTrade,
+                              colors: c,
                             );
                           },
                         ),
@@ -234,7 +239,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   minHeight: 16,
                                 ),
                                 child: Text(
-                                  unread > 9 ? '9+' : '$unread',
+                                  NotificationBell.badgeLabel(unread),
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 9,
@@ -342,7 +347,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _showNotifications(BuildContext context, AppColors c) {
     final notifProvider = context.read<NotificationProvider>();
-    final notifications = notifProvider.notifications;
+    notifProvider.fetchNotifications();
 
     showModalBottomSheet(
       context: context,
@@ -352,9 +357,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
+        return Consumer<NotificationProvider>(
+          builder: (context, notifProvider, _) {
+            final notifications = notifProvider.notifications;
             final unread = notifProvider.unreadCount;
+
             return Container(
               constraints: BoxConstraints(
                 maxHeight: MediaQuery.of(context).size.height * 0.7,
@@ -397,7 +404,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
-                              '$unread',
+                              NotificationBell.badgeLabel(unread),
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 11,
@@ -409,10 +416,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const Spacer(),
                         if (unread > 0)
                           GestureDetector(
-                            onTap: () async {
-                              await notifProvider.markAllAsRead();
-                              setSheetState(() {});
-                            },
+                            onTap: () => notifProvider.markAllAsRead(),
                             child: Text(
                               'Mark all read',
                               style: TextStyle(
@@ -450,7 +454,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             onTap: () {
                               if (!n.isRead) {
                                 notifProvider.markOneAsRead(n.id);
-                                setSheetState(() {});
                               }
                             },
                           );
@@ -609,7 +612,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            '\$${deposit.amount.toStringAsFixed(2)} (${deposit.network}) • ${deposit.status} — awaiting admin approval. Expires: $timeRemaining',
+            '\$${deposit.amount.toStringAsFixed(2)} (${deposit.network}) — $timeRemaining',
             style: const TextStyle(color: Color(0xFF666666), fontSize: 12),
           ),
           if (deposit.walletAddress != null && deposit.walletAddress!.isNotEmpty) ...[
@@ -859,225 +862,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildCopyTradesSection(
-    DashboardData? dashboardData,
-    DashboardProvider dashboardProvider,
-    AppColors c,
-  ) {
-    final copyTrades = dashboardData?.copyTrades ?? [];
-    final isSimulating = dashboardProvider.isSimulating;
-    final limit = dashboardData?.copyTradesLimit ?? 1;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: c.cardBg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: c.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Copy Trades',
-                    style: TextStyle(
-                      color: c.textPrimary,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                    Text(
-                      '$limit trade(s) per day',
-                      style: TextStyle(
-                        color: limit == 0 ? Colors.red[400] : c.textSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
-                ],
-              ),
-              ElevatedButton(
-                onPressed: isSimulating ? null : () => _simulateCopyTrade(),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: c.accentBlue,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: isSimulating
-                    ? const SizedBox(
-                        height: 16,
-                        width: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text('Place Copy Trade'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Trades run for ~1 min (configurable) with live price movement. Profit/loss credited on completion.',
-            style: TextStyle(color: c.textSecondary, fontSize: 12),
-          ),
-          const SizedBox(height: 16),
-          if (copyTrades.isEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: c.surfaceBg,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: c.border),
-              ),
-              child: Text(
-                'No copy trades yet. Place your first trade.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: c.textSecondary, fontSize: 14),
-              ),
-            )
-          else
-            SizedBox(
-              height: 400,
-              child: ListView(
-                children: copyTrades
-                    .take(20)
-                    .map((trade) => _buildCopyTradeCard(trade, c))
-                    .toList(),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCopyTradeCard(CopyTrade trade, AppColors c) {
-    final isPending = trade.isPending;
-    final isDone = trade.isDone;
-    final isProfit = isDone && (trade.profit ?? 0) >= 0;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: c.surfaceBg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isPending
-              ? c.accentBlue
-              : isDone
-                  ? (isProfit ? Colors.green : Colors.red)
-                  : c.border,
-          width: isPending ? 1.5 : 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    trade.pair,
-                    style: TextStyle(
-                      color: c.textPrimary,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                  if (isPending) ...[
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      width: 10,
-                      height: 10,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: c.accentBlue),
-                    ),
-                  ],
-                ],
-              ),
-              Text(
-                isPending ? 'PENDING' : trade.status.toUpperCase(),
-                style: TextStyle(
-                  color: isPending
-                      ? c.accentBlue
-                      : c.textSecondary,
-                  fontSize: 11,
-                  fontWeight: isPending ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: trade.action == 'buy' ? Colors.green : Colors.red,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  trade.action == 'buy' ? 'LONG ▲' : 'SHORT ▼',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '${trade.amount.toStringAsFixed(3)} lots',
-                style: TextStyle(color: c.textPrimary, fontSize: 14),
-              ),
-              const Spacer(),
-              if (isPending) ...[
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '\$${(trade.profit ?? 0).toStringAsFixed(2)}',
-                      style: const TextStyle(color: Color(0xFF4CAF50), fontSize: 14, fontWeight: FontWeight.bold),
-                    ),
-                    if (trade.remaining != null)
-                      Text(
-                        '${trade.remaining!.inSeconds}s',
-                        style: TextStyle(color: c.textSecondary, fontSize: 10),
-                      ),
-                  ],
-                ),
-              ] else if (isDone && trade.profit != null) ...[
-                Text(
-                  '+\$${trade.profit!.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    color: Colors.green,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ] else ...[
-                Text(
-                  'Pending',
-                  style: TextStyle(color: c.textSecondary, fontSize: 11),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Color _parseColor(String colorString) {
     try {
       return Color(int.parse(colorString.replaceFirst('#', '0xFF')));
@@ -1115,8 +899,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
     if (trade != null) {
       Fluttertoast.showToast(
-        msg:
-            "Copy trade: ${trade.pair} ${trade.action} — \$${(trade.profit ?? 0.0).toStringAsFixed(2)} profit",
+        msg: '${trade.pair} ${trade.action.toUpperCase()} — session live',
         toastLength: Toast.LENGTH_SHORT,
         gravity: ToastGravity.BOTTOM,
         backgroundColor: Colors.green,

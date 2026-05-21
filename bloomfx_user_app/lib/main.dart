@@ -6,6 +6,7 @@ import 'package:bloomfx_shared/bloomfx_shared.dart';
 import 'providers/auth_provider.dart';
 import 'providers/dashboard_provider.dart';
 import 'providers/notification_provider.dart';
+import 'providers/support_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/language_provider.dart';
 import 'services/notification_service.dart';
@@ -15,6 +16,7 @@ import 'screens/login_screen.dart';
 import 'screens/main_navigation_screen.dart';
 import 'screens/register_screen.dart';
 import 'screens/username_setup_screen.dart';
+import 'screens/support_chat_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,16 +35,19 @@ void main() async {
   await NotificationService.instance.init();
   await BackgroundService.register();
 
-  runApp(MyApp(
-    authProvider: authProvider,
-    themeProvider: themeProvider,
-    languageProvider: languageProvider,
-  ));
+  runApp(
+    MyApp(
+      authProvider: authProvider,
+      themeProvider: themeProvider,
+      languageProvider: languageProvider,
+    ),
+  );
 }
 
 const String apiBaseUrl = 'https://copybloomfx-mobile-app-backend.onrender.com';
 const String supabaseUrl = 'https://mefbzfgwogvmsgttlffp.supabase.co';
-const String supabaseAnonKey = 'sb_publishable_dQZOlNBgjcWUYaQ8yHX26A_tmO4aqXK';
+const String supabaseAnonKey =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1lZmJ6Zmd3b2d2bXNndHRsZmZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MTU4NTksImV4cCI6MjA5NDI5MTg1OX0.az5I7mJLSxASIvmqRquvXqLF2fBZC9sCm2SOmkQCCwI';
 
 class MyApp extends StatelessWidget {
   final AuthProvider authProvider;
@@ -62,10 +67,7 @@ class MyApp extends StatelessWidget {
       initialLocation: '/',
       refreshListenable: authProvider,
       routes: [
-        GoRoute(
-          path: '/',
-          builder: (context, state) => const SplashScreen(),
-        ),
+        GoRoute(path: '/', builder: (context, state) => const SplashScreen()),
         GoRoute(
           path: '/login',
           builder: (context, state) => const LoginScreen(),
@@ -91,11 +93,16 @@ class MyApp extends StatelessWidget {
           path: '/dashboard',
           builder: (context, state) => const MainNavigationScreen(),
         ),
+        GoRoute(
+          path: '/support-chat',
+          builder: (context, state) => const SupportChatScreen(),
+        ),
       ],
       redirect: (context, state) {
         final auth = Provider.of<AuthProvider>(context, listen: false);
         final loggedIn = auth.isAuthenticated;
-        final onAuthPages = state.matchedLocation == '/login' ||
+        final onAuthPages =
+            state.matchedLocation == '/login' ||
             state.matchedLocation == '/register' ||
             state.matchedLocation == '/username-setup';
 
@@ -113,14 +120,15 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
         ChangeNotifierProvider(
-          create: (context) => DashboardProvider(
-            ApiService(baseUrl: apiBaseUrl),
-          ),
+          create: (context) =>
+              DashboardProvider(ApiService(baseUrl: apiBaseUrl)),
         ),
         ChangeNotifierProvider(
-          create: (context) => NotificationProvider(
-            ApiService(baseUrl: apiBaseUrl),
-          ),
+          create: (context) =>
+              NotificationProvider(ApiService(baseUrl: apiBaseUrl)),
+        ),
+        ChangeNotifierProvider(
+          create: (context) => SupportProvider(baseUrl: apiBaseUrl),
         ),
         ChangeNotifierProvider<ThemeProvider>.value(value: themeProvider),
         ChangeNotifierProvider<LanguageProvider>.value(value: languageProvider),

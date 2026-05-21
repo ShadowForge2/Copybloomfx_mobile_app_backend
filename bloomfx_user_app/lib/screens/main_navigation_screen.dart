@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../providers/auth_provider.dart';
+import '../providers/notification_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/language_provider.dart';
+import '../services/news_generator.dart';
 import 'dashboard_screen.dart';
 import 'finance_screen.dart';
 import 'news_screen.dart';
@@ -18,20 +21,54 @@ class MainNavigationScreen extends StatefulWidget {
   State<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
 
-class _MainNavigationScreenState extends State<MainNavigationScreen> {
+class _MainNavigationScreenState extends State<MainNavigationScreen> with WidgetsBindingObserver {
   int _currentIndex = 0;
+  int _unreadNewsCount = 0;
   bool _permissionsRequested = false;
+  Timer? _unreadTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _requestPermissions();
+    _refreshUnreadCount();
+    _unreadTimer = Timer.periodic(const Duration(seconds: 15), (_) => _refreshUnreadCount());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = context.read<AuthProvider>();
       if (auth.user?.id != null) {
         context.read<ThemeProvider>().setUserId(auth.user!.id);
       }
+      context.read<NotificationProvider>().startPolling();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _unreadTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshUnreadCount();
+    }
+  }
+
+  Future<void> _refreshUnreadCount() async {
+    final count = await NewsStorage.unreadCount();
+    if (!mounted) return;
+    setState(() => _unreadNewsCount = count);
+  }
+
+  Future<void> _onTabSelected(int index) async {
+    setState(() => _currentIndex = index);
+    if (index == 1) {
+      await NewsStorage.markViewed();
+      _refreshUnreadCount();
+    }
   }
 
   Future<void> _requestPermissions() async {
@@ -39,7 +76,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     _permissionsRequested = true;
     await [
       Permission.notification,
-      Permission.camera,
     ].request();
   }
 
@@ -88,18 +124,21 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             ),
             child: BottomNavigationBar(
               currentIndex: _currentIndex,
-              onTap: (index) {
-                setState(() {
-                  _currentIndex = index;
-                });
-              },
+              onTap: _onTabSelected,
               backgroundColor: c.cardBg,
               selectedItemColor: c.accentBlue,
               unselectedItemColor: c.textSecondary,
               type: BottomNavigationBarType.fixed,
-              items: items.map((item) {
+              items: items.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final item = entry.value;
                 return BottomNavigationBarItem(
-                  icon: Icon(item.icon),
+                  icon: idx == 1 && _unreadNewsCount > 0
+                      ? Badge(
+                          label: Text(_unreadNewsCount > 9 ? '9+' : '$_unreadNewsCount', style: const TextStyle(color: Colors.white, fontSize: 10)),
+                          child: Icon(item.icon),
+                        )
+                      : Icon(item.icon),
                   label: item.label,
                 );
               }).toList(),

@@ -98,7 +98,15 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
 
       final user = username ?? '${firstName.toLowerCase()}_${lastName.toLowerCase()}';
-      final res = await _apiService.register(user, password, email: email);
+      final trimmedReferral = referralCode?.trim();
+      final res = await _apiService.register(
+        user,
+        password,
+        email: email,
+        firstName: firstName,
+        lastName: lastName,
+        referrerCode: (trimmedReferral != null && trimmedReferral.isNotEmpty) ? trimmedReferral : null,
+      );
       if (res.success && res.data != null) {
         final token = res.data!['token']?.toString() ?? '';
         final userJson = res.data!['user'] as Map<String, dynamic>?;
@@ -161,12 +169,17 @@ class AuthProvider extends ChangeNotifier {
       final creds = await AuthService.getAllStoredCredentials();
       if (creds.isNotEmpty) {
         final lastUser = await AuthService.getLastActiveUsername();
+        final entries = creds.entries.toList();
         if (lastUser != null && creds.containsKey(lastUser)) {
           final ok = await login(lastUser, creds[lastUser]!);
           if (ok) return;
         }
-        for (final entry in creds.entries) {
+        int attempts = 0;
+        for (final entry in entries) {
           if (entry.key == lastUser) continue;
+          if (attempts >= 3) break;
+          attempts++;
+          await Future.delayed(const Duration(milliseconds: 300));
           final ok = await login(entry.key, entry.value);
           if (ok) return;
         }

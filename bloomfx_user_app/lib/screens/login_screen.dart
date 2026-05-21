@@ -40,7 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(ctx);
-              launchUrl(Uri.parse('https://t.me/BloomFXSupport'));
+              launchUrl(Uri.parse('https://t.me/CPBloomFX'));
             },
             child: const Text('Contact Support'),
           ),

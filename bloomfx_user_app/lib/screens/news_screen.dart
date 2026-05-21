@@ -14,35 +14,71 @@ class NewsScreen extends StatefulWidget {
   State<NewsScreen> createState() => _NewsScreenState();
 }
 
-class _NewsScreenState extends State<NewsScreen> {
+class _NewsScreenState extends State<NewsScreen> with WidgetsBindingObserver {
   final List<NewsItem> _news = [];
   Timer? _generationTimer;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
-    _generateInitialBatch();
+    WidgetsBinding.instance.addObserver(this);
+    _loadPersistedNews();
     _scheduleNext();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) => _reloadFromStorage());
   }
 
-  void _generateInitialBatch() {
-    final now = DateTime.now();
-    final messages = NewsGenerator.generateBatch(15);
-    for (int i = 0; i < messages.length; i++) {
-      _news.add(NewsItem(
-        id: 'news_${now.millisecondsSinceEpoch}_$i',
-        message: messages[i],
-        createdAt: now.subtract(Duration(minutes: (messages.length - i) * 17)),
-      ));
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _generationTimer?.cancel();
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _reloadFromStorage();
     }
-    _news.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  Future<void> _reloadFromStorage() async {
+    final stored = await NewsStorage.load();
+    if (!mounted) return;
+    setState(() => _news
+      ..clear()
+      ..addAll(stored));
+    await NewsStorage.markViewed();
+  }
+
+  Future<void> _loadPersistedNews() async {
+    final stored = await NewsStorage.load();
+    if (!mounted) return;
+    if (stored.isNotEmpty) {
+      setState(() => _news.addAll(stored));
+    } else {
+      final now = DateTime.now();
+      final messages = NewsGenerator.generateBatch(15);
+      final batch = <NewsItem>[];
+      for (int i = 0; i < messages.length; i++) {
+        batch.add(NewsItem(
+          id: 'news_${now.millisecondsSinceEpoch}_$i',
+          message: messages[i],
+          createdAt: now.subtract(Duration(minutes: (messages.length - i) * 17)),
+        ));
+      }
+      batch.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      setState(() => _news.addAll(batch));
+      NewsStorage.save(batch);
+    }
   }
 
   void _scheduleNext() {
     _generationTimer?.cancel();
     final hours = NewsGenerator.nextIntervalHours();
     final ms = hours * 3600000;
-    _generationTimer = Timer(Duration(milliseconds: ms), () {
+    _generationTimer = Timer(Duration(milliseconds: ms), () async {
       if (!mounted) return;
       final item = NewsItem(
         id: 'news_${DateTime.now().millisecondsSinceEpoch}',
@@ -53,15 +89,10 @@ class _NewsScreenState extends State<NewsScreen> {
         _news.insert(0, item);
         if (_news.length > 100) _news.removeLast();
       });
+      await NewsStorage.save(_news);
       NotificationService.instance.showNewsNotification(item);
       _scheduleNext();
     });
-  }
-
-  @override
-  void dispose() {
-    _generationTimer?.cancel();
-    super.dispose();
   }
 
   @override

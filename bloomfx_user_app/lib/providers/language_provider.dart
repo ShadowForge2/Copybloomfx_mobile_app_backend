@@ -152,7 +152,7 @@ const _allTranslations = <String, Map<String, String>>{
     'finance.bank': 'Bank Transfer',
     'finance.bank.desc': 'Withdraw to your local bank account',
     'finance.withdraw.crypto': 'Crypto Withdrawal',
-    'finance.min.withdraw': 'Minimum \$%s. Withdrawable debited now. Admin processes and marks complete.',
+    'finance.min.withdraw': 'Minimum withdrawal \$%s, use USDT(BEP-20) only for withdrawal. Withdrawals are processed after admin careful review.',
     'finance.withdraw.address': 'USDT (BEP-20) Address',
     'finance.withdraw.hint': '0x...',
     'finance.withdraw.submit': 'Submit withdrawal',

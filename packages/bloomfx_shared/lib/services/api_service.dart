@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+
+const _kRequestTimeout = Duration(seconds: 30);
 
 class ApiResponse {
   final bool success;
@@ -13,8 +16,14 @@ class ApiResponse {
 class ApiService {
   final String baseUrl;
   final String? authToken;
+  final http.Client _httpClient;
 
-  ApiService({required this.baseUrl, this.authToken});
+  ApiService({required this.baseUrl, this.authToken})
+      : _httpClient = http.Client();
+
+  void dispose() {
+    _httpClient.close();
+  }
 
   Map<String, String> get _headers {
     final h = <String, String>{
@@ -34,17 +43,26 @@ class ApiService {
       return 'Unable to reach the server. Please try again later.';
     }
     if (e is http.ClientException) {
-      if (e.message.contains('timed out') || e.message.contains('timeout')) {
-        return 'Request timed out. Please check your connection and try again.';
+      final msg = e.message.toLowerCase();
+      if (msg.contains('timed out') || msg.contains('timeout')) {
+        return 'Request timed out. The server may be starting up. Please try again.';
+      }
+      if (msg.contains('xmlhttprequest') || msg.contains('failed to fetch')) {
+        return 'Unable to reach the server (CORS/network). Check that the backend is running and accessible.';
       }
       return 'Unable to connect to the server. Please try again later.';
+    }
+    if (e is TimeoutException) {
+      return 'Request timed out. If hosted on Render, the server may be cold-starting (takes up to 60s). Please try again.';
     }
     return 'Something went wrong. Please try again.';
   }
 
   Future<ApiResponse> _get(String path) async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl$path'), headers: _headers);
+      final res = await _httpClient
+          .get(Uri.parse('$baseUrl$path'), headers: _headers)
+          .timeout(_kRequestTimeout);
       return _parseResponse(res);
     } catch (e) {
       return ApiResponse(success: false, message: _friendlyError(e));
@@ -53,11 +71,13 @@ class ApiService {
 
   Future<ApiResponse> _post(String path, {Map<String, dynamic>? body}) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl$path'),
-        headers: _headers,
-        body: body != null ? jsonEncode(body) : null,
-      );
+      final res = await _httpClient
+          .post(
+            Uri.parse('$baseUrl$path'),
+            headers: _headers,
+            body: body != null ? jsonEncode(body) : null,
+          )
+          .timeout(_kRequestTimeout);
       return _parseResponse(res);
     } catch (e) {
       return ApiResponse(success: false, message: _friendlyError(e));
@@ -66,11 +86,13 @@ class ApiService {
 
   Future<ApiResponse> _put(String path, {Map<String, dynamic>? body}) async {
     try {
-      final res = await http.put(
-        Uri.parse('$baseUrl$path'),
-        headers: _headers,
-        body: body != null ? jsonEncode(body) : null,
-      );
+      final res = await _httpClient
+          .put(
+            Uri.parse('$baseUrl$path'),
+            headers: _headers,
+            body: body != null ? jsonEncode(body) : null,
+          )
+          .timeout(_kRequestTimeout);
       return _parseResponse(res);
     } catch (e) {
       return ApiResponse(success: false, message: _friendlyError(e));
@@ -79,11 +101,13 @@ class ApiService {
 
   Future<ApiResponse> _patch(String path, {Map<String, dynamic>? body}) async {
     try {
-      final res = await http.patch(
-        Uri.parse('$baseUrl$path'),
-        headers: _headers,
-        body: body != null ? jsonEncode(body) : null,
-      );
+      final res = await _httpClient
+          .patch(
+            Uri.parse('$baseUrl$path'),
+            headers: _headers,
+            body: body != null ? jsonEncode(body) : null,
+          )
+          .timeout(_kRequestTimeout);
       return _parseResponse(res);
     } catch (e) {
       return ApiResponse(success: false, message: _friendlyError(e));
@@ -110,14 +134,29 @@ class ApiService {
   Future<ApiResponse> login(String username, String password) =>
       _post('/api/auth/login', body: {'username': username, 'password': password});
 
-  Future<ApiResponse> register(String username, String password, {String? email}) =>
-      _post('/api/auth/signup', body: {'username': username, 'password': password, 'email': email});
+  Future<ApiResponse> register(
+    String username,
+    String password, {
+    String? email,
+    String? firstName,
+    String? lastName,
+    String? referrerCode,
+  }) =>
+      _post('/api/auth/signup', body: {
+        'username': username,
+        'password': password,
+        if (email != null) 'email': email,
+        if (firstName != null) 'firstName': firstName,
+        if (lastName != null) 'lastName': lastName,
+        if (referrerCode != null && referrerCode.trim().isNotEmpty) 'referrerCode': referrerCode.trim(),
+      });
 
   Future<ApiResponse> refreshToken(String token) =>
       _post('/api/auth/refresh', body: {'token': token});
 
   // ----- User -----
   Future<ApiResponse> getUserDashboard() => _get('/api/user/dashboard');
+  Future<ApiResponse> getUserReferrals() => _get('/api/user/referral');
   Future<ApiResponse> getUserFinance() => _get('/api/user/finance');
   Future<ApiResponse> getUserNotifications() => _get('/api/user/notifications');
   Future<ApiResponse> getDepositStatus(String id) => _get('/api/user/deposits/$id/status');
@@ -133,7 +172,9 @@ class ApiService {
       _post('/api/user/paystack/verify', body: {'reference': reference});
   Future<ApiResponse> redeemPromo(String code) =>
       _post('/api/user/promo/redeem', body: {'code': code});
-  Future<ApiResponse> markNotificationsRead() => _post('/api/user/notifications/mark-read');
+  Future<ApiResponse> markNotificationsRead({String? notificationId}) =>
+      _post('/api/user/notifications/mark-read',
+          body: notificationId != null ? {'id': notificationId} : null);
   Future<ApiResponse> updateProfile(Map<String, dynamic> data) =>
       _put('/api/user/profile', body: data);
 
@@ -148,7 +189,8 @@ class ApiService {
   Future<ApiResponse> approveWithdrawal(String id) => _post('/api/admin/withdrawals/$id/approve');
   Future<ApiResponse> rejectWithdrawal(String id) => _post('/api/admin/withdrawals/$id/reject');
   Future<ApiResponse> createPromo(Map<String, dynamic> data) => _post('/api/admin/promos', body: data);
-  Future<ApiResponse> togglePromo(String id) => _patch('/api/admin/promos/$id');
+  Future<ApiResponse> togglePromo(String id, {required bool isActive}) =>
+      _patch('/api/admin/promos/$id', body: {'isActive': isActive});
   Future<ApiResponse> flagUser(String id) => _post('/api/admin/users/$id/flag');
   Future<ApiResponse> unflagUser(String id) => _post('/api/admin/users/$id/unflag');
   Future<ApiResponse> banUser(String id) => _post('/api/admin/users/$id/ban');

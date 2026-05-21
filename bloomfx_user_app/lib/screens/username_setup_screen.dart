@@ -31,6 +31,14 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   bool _isLoading = false;
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.referralCode.trim().isNotEmpty) {
+      _referralCodeController.text = widget.referralCode.trim();
+    }
+  }
+
+  @override
   void dispose() {
     _usernameController.dispose();
     _referralCodeController.dispose();
@@ -69,7 +77,9 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
         widget.email,
         widget.password,
         username: _usernameController.text.trim(),
-        referralCode: _referralCodeController.text.trim(),
+        referralCode: _referralCodeController.text.trim().isNotEmpty
+            ? _referralCodeController.text.trim()
+            : (widget.referralCode.trim().isNotEmpty ? widget.referralCode.trim() : null),
       );
 
       if (success) {

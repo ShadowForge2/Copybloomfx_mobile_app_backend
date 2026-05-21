@@ -5,3 +5,33 @@ package-lock.json
 *.log
 .DS_Store
 Thumbs.db
+
+# Flutter
+.dart_tool/
+.packages
+*.iml
+.metadata
+build/
+.android/
+.ios/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# IDE
+.idea/
+.vscode/
+
+# Chrome profiles
+.chrome_admin/
+.chrome_user/
+
+# Node / reward system
+reward-system/node_modules/
+
+# Dart
+.pub/
+.pub-cache/
+
+# Generated
+*.g.dart
+*.freezed.dart

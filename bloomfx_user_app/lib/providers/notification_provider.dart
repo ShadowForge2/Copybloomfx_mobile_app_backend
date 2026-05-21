@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:bloomfx_shared/bloomfx_shared.dart';
 import '../models/notification_model.dart';
+import '../services/news_sync.dart';
+import '../services/notification_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class NotificationProvider extends ChangeNotifier with WidgetsBindingObserver {
   final ApiService _apiService;
@@ -11,6 +14,25 @@ class NotificationProvider extends ChangeNotifier with WidgetsBindingObserver {
   Timer? _pollTimer;
   bool _isBackgrounded = false;
   Duration _pollInterval = const Duration(seconds: 30);
+  final Set<String> _seenIds = {};
+  bool _isFirstFetch = true;
+
+  Future<void> _loadSeenNotificationIds(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = prefs.getStringList('seen_notification_ids_$userId');
+      if (list != null) {
+        _seenIds.addAll(list);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveSeenNotificationIds(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('seen_notification_ids_$userId', _seenIds.toList());
+    } catch (_) {}
+  }
 
   NotificationProvider(this._apiService) {
     WidgetsBinding.instance.addObserver(this);
@@ -34,7 +56,11 @@ class NotificationProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   int get unreadCount => _notifications.where((n) => !n.isRead).length;
 
-  bool get _useLocalOnly => _apiService.baseUrl.contains('your-backend-api.com') || _apiService.baseUrl.contains('10.0.2.2') || _apiService.baseUrl.contains('127.0.0.1');
+  bool get _useLocalOnly =>
+      _apiService.baseUrl.contains('your-backend-api.com') ||
+      _apiService.baseUrl.contains('10.0.2.2') ||
+      _apiService.baseUrl.contains('127.0.0.1') ||
+      _apiService.baseUrl.contains('localhost');
 
   List<AppNotification> _buildLocalNotifications() {
     final now = DateTime.now();
@@ -50,34 +76,10 @@ class NotificationProvider extends ChangeNotifier with WidgetsBindingObserver {
       AppNotification(
         id: '2',
         title: 'Deposit Approved',
-        message: 'Your deposit of \$250.00 has been approved and credited to your locked balance.',
+        message: 'Your deposit of \$250.00 has been approved and credited to your tradable balance.',
         type: NotificationType.success,
         isRead: false,
         createdAt: now.subtract(const Duration(hours: 2)),
-      ),
-      AppNotification(
-        id: '3',
-        title: 'Rank Up!',
-        message: 'Congratulations! You\'ve advanced to Stock Shark rank. New copy trade limits unlocked.',
-        type: NotificationType.success,
-        isRead: true,
-        createdAt: now.subtract(const Duration(days: 1)),
-      ),
-      AppNotification(
-        id: '4',
-        title: 'System Maintenance',
-        message: 'Scheduled maintenance on Sunday 2:00 AM UTC. Services may be unavailable for 2 hours.',
-        type: NotificationType.maintenance,
-        isRead: true,
-        createdAt: now.subtract(const Duration(days: 2)),
-      ),
-      AppNotification(
-        id: '5',
-        title: 'Copy Trade Completed',
-        message: 'BTC/USDT buy simulation completed with \$15.50 profit. Added to withdrawable balance.',
-        type: NotificationType.success,
-        isRead: true,
-        createdAt: now.subtract(const Duration(days: 3)),
       ),
     ];
   }
@@ -89,34 +91,82 @@ class NotificationProvider extends ChangeNotifier with WidgetsBindingObserver {
         await Future.delayed(const Duration(milliseconds: 300));
         _notifications = _buildLocalNotifications();
       } else {
+        final user = await AuthService.getCurrentUser();
+        final uId = user?.id;
+        if (uId != null) {
+          await _loadSeenNotificationIds(uId);
+        }
+
         final token = await AuthService.getToken();
         final api = ApiService(baseUrl: _apiService.baseUrl, authToken: token);
-        final res = api.getUserNotifications();
-        final response = await res;
+        final response = await api.getUserNotifications();
         if (response.success && response.data != null) {
           final rawList = response.data!['notifications'] as List<dynamic>? ?? [];
           _notifications = rawList
               .map((n) => AppNotification.fromJson(Map<String, dynamic>.from(n as Map)))
               .toList();
           _sortNotifications();
-        } else {
-          _errorMessage = response.message.isNotEmpty ? response.message : 'Notifications unavailable';
-          if (_notifications.isEmpty) {
-            _notifications = _buildLocalNotifications();
+          await _handleIncomingNotifications(_notifications, triggerLocalNotifications: !_isFirstFetch);
+          _isFirstFetch = false;
+          if (uId != null) {
+            await _saveSeenNotificationIds(uId);
           }
+        } else if (_notifications.isEmpty) {
+          _errorMessage =
+              response.message.isNotEmpty ? response.message : 'Notifications unavailable';
         }
       }
     } catch (e) {
-      _errorMessage = 'Failed to load notifications. Please try again.';
       if (_notifications.isEmpty) {
-        _notifications = _buildLocalNotifications();
+        _errorMessage = 'Failed to load notifications. Please try again.';
       }
     }
     notifyListeners();
   }
 
+  Future<void> _handleIncomingNotifications(List<AppNotification> list, {bool triggerLocalNotifications = true}) async {
+    await NewsSync.mirrorNotificationsToNews(list);
+
+    for (final n in list) {
+      final added = _seenIds.add(n.id);
+      if (!added) continue;
+      if (_isBackgrounded) continue;
+      if (!triggerLocalNotifications) continue;
+      final title = n.title.toLowerCase();
+      final amount = _parseAmount(n.message);
+      if (title.contains('deposit approved')) {
+        await NotificationService.instance.showDepositApproved(amount);
+      } else if (title.contains('withdrawal delivered')) {
+        await NotificationService.instance.showWithdrawalDelivered(amount);
+      } else if (title.contains('deposit pending')) {
+        await NotificationService.instance.showDepositPending(amount);
+      } else if (title.contains('support reply')) {
+        await NotificationService.instance.showSupportReply(n.message);
+      }
+    }
+  }
+
+  double _parseAmount(String message) {
+    final match = RegExp(r'\$([0-9]+(?:\.[0-9]+)?)').firstMatch(message);
+    if (match == null) return 0;
+    return double.tryParse(match.group(1) ?? '') ?? 0;
+  }
+
   Future<int> markAllAsRead() async {
     try {
+      if (!_useLocalOnly) {
+        final token = await AuthService.getToken();
+        final api = ApiService(baseUrl: _apiService.baseUrl, authToken: token);
+        final res = await api.markNotificationsRead();
+        if (!res.success) {
+          _errorMessage = res.message.isNotEmpty
+              ? res.message
+              : 'Failed to mark notifications as read. Please try again.';
+          notifyListeners();
+          return 0;
+        }
+      }
+
       var count = 0;
       for (var i = 0; i < _notifications.length; i++) {
         if (!_notifications[i].isRead) {
@@ -124,14 +174,7 @@ class NotificationProvider extends ChangeNotifier with WidgetsBindingObserver {
           count++;
         }
       }
-      if (count > 0) {
-        if (!_useLocalOnly) {
-          final token = await AuthService.getToken();
-          final api = ApiService(baseUrl: _apiService.baseUrl, authToken: token);
-          await api.markNotificationsRead();
-        }
-        notifyListeners();
-      }
+      if (count > 0) notifyListeners();
       return count;
     } catch (e) {
       _errorMessage = 'Failed to mark notifications as read. Please try again.';
@@ -140,9 +183,29 @@ class NotificationProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  void markOneAsRead(String id) {
+  Future<void> markOneAsRead(String id) async {
     final idx = _notifications.indexWhere((n) => n.id == id && !n.isRead);
     if (idx < 0) return;
+
+    if (!_useLocalOnly) {
+      try {
+        final token = await AuthService.getToken();
+        final api = ApiService(baseUrl: _apiService.baseUrl, authToken: token);
+        final res = await api.markNotificationsRead(notificationId: id);
+        if (!res.success) {
+          _errorMessage = res.message.isNotEmpty
+              ? res.message
+              : 'Failed to mark notification as read.';
+          notifyListeners();
+          return;
+        }
+      } catch (e) {
+        _errorMessage = 'Failed to mark notification as read.';
+        notifyListeners();
+        return;
+      }
+    }
+
     _notifications[idx] = _notifications[idx].copyWith(isRead: true);
     notifyListeners();
   }
@@ -151,9 +214,11 @@ class NotificationProvider extends ChangeNotifier with WidgetsBindingObserver {
     _notifications.sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
-  void startPolling({Duration interval = const Duration(seconds: 30)}) {
+  void startPolling({Duration interval = const Duration(seconds: 15)}) {
     _pollInterval = interval;
     _pollTimer?.cancel();
+    _seenIds.clear();
+    _isFirstFetch = true;
     fetchNotifications();
     _pollTimer = Timer.periodic(interval, (_) => fetchNotifications());
   }

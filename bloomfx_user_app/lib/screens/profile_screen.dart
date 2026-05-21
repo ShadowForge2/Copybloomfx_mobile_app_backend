@@ -4,13 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:bloomfx_shared/bloomfx_shared.dart';
-import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import '../providers/auth_provider.dart';
 import '../providers/dashboard_provider.dart';
 import '../providers/theme_provider.dart';
-import '../providers/language_provider.dart';
-import '../services/theme_colors.dart';
 import '../widgets/notification_ui.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -82,8 +79,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer4<AuthProvider, DashboardProvider, ThemeProvider, LanguageProvider>(
-      builder: (context, authProvider, dashProvider, themeProvider, langProvider, child) {
+    return Consumer3<AuthProvider, DashboardProvider, ThemeProvider>(
+      builder: (context, authProvider, dashProvider, themeProvider, child) {
         if (authProvider.user == null) {
           return const Center(
             child: CircularProgressIndicator(color: Colors.white),
@@ -109,12 +106,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         _buildPersonalInfoSection(c),
                         const SizedBox(height: 24),
                         _buildPromoSection(c),
-                        const SizedBox(height: 24),
-                        _buildAccountSettings(c, langProvider),
-                        const SizedBox(height: 24),
-                        _buildSecuritySection(c),
-                        const SizedBox(height: 24),
-                        _buildLogoutButton(),
                       ],
                     ),
                   ),
@@ -410,119 +401,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 : const Text('Redeem Promo'),
             ),
           ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: c.accentBlue.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: c.accentBlue.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.telegram, color: c.accentBlue, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Promo codes are only available through our Telegram channels. Join us to get exclusive codes.',
+                    style: TextStyle(color: c.textSecondary, fontSize: 12, height: 1.4),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildAccountSettings(AppColors c, LanguageProvider langProvider) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: c.cardBg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: c.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Account Settings',
-            style: TextStyle(
-              color: c.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16),
-          _buildSettingsItem('Notifications', Icons.notifications, () {}, c),
-          const SizedBox(height: 8),
-          _buildSettingsItem('Privacy', Icons.lock, () {}, c),
-          const SizedBox(height: 8),
-          _buildSettingsItem('Language', Icons.language, () => _showLanguagePicker(langProvider), c),
-          const SizedBox(height: 8),
-          _buildSettingsItem('Theme', Icons.palette, () {}, c),
-        ],
-      ),
-    );
-  }
 
-  Widget _buildSettingsItem(String title, IconData icon, VoidCallback onTap, AppColors c) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: c.surfaceBg,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: c.iconColor),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(color: c.textPrimary),
-              ),
-            ),
-            Icon(
-              Icons.arrow_forward_ios,
-              color: c.iconColor,
-              size: 16,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSecuritySection(AppColors c) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: c.cardBg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: c.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Security',
-            style: TextStyle(
-              color: c.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 16),
-          _buildSettingsItem('Change Password', Icons.password, () {}, c),
-          const SizedBox(height: 8),
-          _buildSettingsItem('Two-Factor Authentication', Icons.security, () {}, c),
-          const SizedBox(height: 8),
-          _buildSettingsItem('Login History', Icons.history, () {}, c),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLogoutButton() {
-    return Container(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: () => _showLogoutDialog(),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ),
-        child: const Text('Logout'),
-      ),
-    );
-  }
 
   DecorationImage? _profileImageProvider(String url) {
     if (url.startsWith('data:image')) {
@@ -570,13 +476,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final base64 = base64Encode(bytes);
       final dataUrl = 'data:image/$ext;base64,$base64';
 
-      final api = ApiService(baseUrl: 'https://copybloomfx-mobile-app-backend.onrender.com');
       final token = await AuthService.getToken();
       if (token == null) {
         setState(() => _isUploading = false);
         return;
       }
-      final authed = ApiService(baseUrl: api.baseUrl, authToken: token);
+      final baseUrl = context.read<DashboardProvider>().apiBaseUrl;
+      final authed = ApiService(baseUrl: baseUrl, authToken: token);
       final res = await authed.updateProfile({'profile_picture': dataUrl});
 
       if (res.success) {
@@ -647,61 +553,4 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  void _showLogoutDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        final c = context.read<ThemeProvider>().colors;
-        return AlertDialog(
-          title: Text('Logout', style: TextStyle(color: c.textPrimary)),
-          content: Text('Are you sure you want to logout?', style: TextStyle(color: c.textSecondary)),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Cancel', style: TextStyle(color: c.accentBlue)),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                context.read<AuthProvider>().logout();
-                context.go('/login');
-              },
-              child: const Text('Logout', style: TextStyle(color: Colors.red)),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _showLanguagePicker(LanguageProvider langProvider) {
-    final languages = [
-      {'code': 'en', 'name': 'English'},
-      {'code': 'pt', 'name': 'Português'},
-      {'code': 'zh', 'name': '中文'},
-      {'code': 'ja', 'name': '日本語'},
-      {'code': 'hi', 'name': 'हिन्दी'},
-    ];
-    final c = context.appColors;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Select Language', style: TextStyle(color: c.textPrimary)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: languages.map((l) => ListTile(
-            title: Text(l['name']!, style: TextStyle(color: c.textPrimary)),
-            leading: Icon(
-              langProvider.currentCode == l['code'] ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-              color: c.accentBlue,
-            ),
-            onTap: () {
-              langProvider.setLanguage(l['code']!);
-              Navigator.pop(ctx);
-            },
-          )).toList(),
-        ),
-      ),
-    );
-  }
 }

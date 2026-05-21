@@ -1,0 +1,13 @@
+name: bloomfx_shared
+description: Shared models, services, and utilities for BloomFX apps.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.3.5
+  http: ^1.2.0

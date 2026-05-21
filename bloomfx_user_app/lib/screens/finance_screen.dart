@@ -6,6 +6,7 @@ import 'package:bloomfx_shared/bloomfx_shared.dart';
 import '../models/finance_models.dart';
 import '../providers/auth_provider.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/notification_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/investment_logic.dart';
 import '../services/notification_service.dart';
@@ -21,6 +22,7 @@ class FinanceScreen extends StatefulWidget {
 class _FinanceScreenState extends State<FinanceScreen> {
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _walletController = TextEditingController();
+  final ScrollController _historyScrollController = ScrollController();
   String _selectedNetwork = InvestmentLogic.depositNetworks.first;
 
   @override
@@ -35,6 +37,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
   void dispose() {
     _amountController.dispose();
     _walletController.dispose();
+    _historyScrollController.dispose();
     super.dispose();
   }
 
@@ -78,7 +81,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildFinancialOverview(profile, finance?.overview, c),
+                        _buildFinancialOverview(dashboardProvider, c),
                         const SizedBox(height: 8),
                         Text(
                           'Deposits stay pending until an admin approves; then funds credit to tradable balance. '
@@ -152,7 +155,22 @@ class _FinanceScreenState extends State<FinanceScreen> {
     );
   }
 
-  Widget _buildFinancialOverview(Profile? profile, FinanceOverview? overview, AppColors c) {
+  Widget _buildFinancialOverview(DashboardProvider dash, AppColors c) {
+    final profile = dash.data?.profile;
+    final overview = dash.finance?.overview;
+    final deposits = dash.finance?.deposits ?? const <UserDeposit>[];
+    final now = DateTime.now();
+    
+    double recentApprovedAmount = 0;
+    for (final d in deposits) {
+      if (d.status == 'approved' && d.expiresAt != null) {
+        final approvedAt = d.expiresAt!.subtract(const Duration(days: InvestmentLogic.lockDays));
+        if (now.difference(approvedAt).inMinutes < 5) {
+          recentApprovedAmount += d.amount;
+        }
+      }
+    }
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -198,8 +216,8 @@ class _FinanceScreenState extends State<FinanceScreen> {
             children: [
               Expanded(
                 child: _buildOverviewCard(
-                  'Approved deposits (Σ)',
-                  '\$${overview?.totalDeposits.toStringAsFixed(2) ?? '0.00'}',
+                  'Approved deposits',
+                  '\$${recentApprovedAmount.toStringAsFixed(2)}',
                   c.accentBlue,
                   c,
                 ),
@@ -418,6 +436,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
     final deposits = dash.finance?.deposits ?? const <UserDeposit>[];
     final withdrawals = dash.finance?.withdrawals ?? const <UserWithdrawal>[];
     final combined = <Map<String, Object?>>[];
+
     for (final d in deposits) {
       combined.add({'type': 'deposit', 'obj': d, 'at': d.createdAt});
     }
@@ -425,6 +444,35 @@ class _FinanceScreenState extends State<FinanceScreen> {
       combined.add({'type': 'withdrawal', 'obj': w, 'at': w.createdAt});
     }
     combined.sort((a, b) => (b['at'] as DateTime).compareTo(a['at'] as DateTime));
+
+    Widget buildList() {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: combined.map((row) {
+          if (row['type'] == 'deposit') {
+            final d = row['obj']! as UserDeposit;
+            return _buildTransactionItem(
+              'Deposit',
+              '\$${d.amount.toStringAsFixed(2)}',
+              d.network,
+              d.status,
+              Colors.orange,
+              c,
+            );
+          }
+          final w = row['obj']! as UserWithdrawal;
+          return _buildTransactionItem(
+            'Withdrawal',
+            '\$${w.amount.toStringAsFixed(2)}',
+            w.network,
+            w.status,
+            Colors.redAccent,
+            c,
+          );
+        }).toList(),
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -452,29 +500,23 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 style: TextStyle(color: c.textSecondary),
               ),
             )
+          else if (combined.length > 10)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 560),
+              child: Scrollbar(
+                controller: _historyScrollController,
+                thumbVisibility: true,
+                child: SingleChildScrollView(
+                  controller: _historyScrollController,
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 8.0),
+                    child: buildList(),
+                  ),
+                ),
+              ),
+            )
           else
-            ...combined.map((row) {
-              if (row['type'] == 'deposit') {
-                final d = row['obj']! as UserDeposit;
-                return _buildTransactionItem(
-                  'Deposit',
-                  '\$${d.amount.toStringAsFixed(2)}',
-                  d.network,
-                  d.status,
-                  Colors.orange,
-                  c,
-                );
-              }
-              final w = row['obj']! as UserWithdrawal;
-              return _buildTransactionItem(
-                'Withdrawal',
-                '\$${w.amount.toStringAsFixed(2)}',
-                w.network,
-                w.status,
-                Colors.redAccent,
-                c,
-              );
-            }),
+            buildList(),
         ],
       ),
     );
@@ -664,6 +706,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
     if (!networks.contains(_selectedNetwork)) {
       _selectedNetwork = networks.first;
     }
+    bool isProcessing = false;
 
     showModalBottomSheet(
       context: context,
@@ -748,7 +791,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: dash.isSubmittingDeposit
+                  onPressed: isProcessing
                       ? null
                       : () async {
                           final amt = double.tryParse(_amountController.text) ?? 0;
@@ -758,6 +801,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                             );
                             return;
                           }
+                          setModalState(() => isProcessing = true);
                           final dep = await dash.submitDeposit(
                             amount: amt,
                             network: _selectedNetwork,
@@ -765,6 +809,8 @@ class _FinanceScreenState extends State<FinanceScreen> {
                           if (!context.mounted) return;
                           Navigator.pop(context);
                           if (dep != null) {
+                            context.read<NotificationProvider>().fetchNotifications();
+                            NotificationService.instance.showDepositPending(dep.amount);
                             _showPendingDepositDialog(dep, dash, c);
                           } else {
                             Fluttertoast.showToast(
@@ -778,10 +824,17 @@ class _FinanceScreenState extends State<FinanceScreen> {
                     backgroundColor: Colors.orange,
                     foregroundColor: Colors.white,
                   ),
-                  child: dash.isSubmittingDeposit
-                      ? const SizedBox(
-                          width: 20, height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  child: isProcessing
+                      ? const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SizedBox(
+                              width: 18, height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            ),
+                            SizedBox(width: 10),
+                            Text('Processing...'),
+                          ],
                         )
                       : const Text('Submit crypto deposit'),
                 ),
@@ -908,7 +961,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           const Text(
-                                            'Complete your payment in the browser, then tap Verify below.',
+                                            'Complete your payment, then tap Verify below.',
                                             style: TextStyle(color: Colors.white70),
                                           ),
                                           const SizedBox(height: 16),
@@ -1151,8 +1204,9 @@ class _FinanceScreenState extends State<FinanceScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Minimum \$${data?.minWithdrawal.toStringAsFixed(2) ?? '10.00'}. '
-                'Withdrawable debited now. Admin processes and marks complete.',
+                'Minimum withdrawal \$${data?.minWithdrawal.toStringAsFixed(2) ?? '10.00'}, '
+                'use USDT(BEP-20) only for withdrawal. '
+                'Withdrawals are processed after admin careful review.',
                 style: TextStyle(color: c.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 20),
@@ -1213,6 +1267,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                           if (!context.mounted) return;
                           Navigator.pop(context);
                           if (w != null) {
+                            context.read<NotificationProvider>().fetchNotifications();
                             Fluttertoast.showToast(
                               msg: 'Withdrawal pending. Admin will process payout to your USDT BEP-20 address.',
                               backgroundColor: Colors.green,
@@ -1249,8 +1304,8 @@ class _FinanceScreenState extends State<FinanceScreen> {
   void _showPendingDepositDialog(UserDeposit dep, DashboardProvider dash, AppColors c) {
     const fiveMin = Duration(minutes: 5);
     const pollInterval = Duration(seconds: 3);
-    final walletExpiresAt = DateTime.now().add(fiveMin);
-    final fixedExpiry = walletExpiresAt;
+    final walletCountdownEnd = dep.walletExpiresAt ?? DateTime.now().add(fiveMin);
+    final fixedExpiry = walletCountdownEnd;
     ValueNotifier<DateTime> expiresAtNotifier = ValueNotifier(fixedExpiry);
     ValueNotifier<String> statusNotifier = ValueNotifier('pending');
     ValueNotifier<bool> approvedNotifier = ValueNotifier(false);
@@ -1281,8 +1336,13 @@ class _FinanceScreenState extends State<FinanceScreen> {
               approvedNotifier.value = true;
               pollTimer?.cancel();
               countdownTimer?.cancel();
+              if (context.mounted) {
+                context.read<NotificationProvider>().fetchNotifications();
+                context.read<DashboardProvider>().fetchFinance();
+                context.read<DashboardProvider>().fetchDashboardData(userId: context.read<AuthProvider>().user?.id);
+              }
               NotificationService.instance.showDepositApproved(dep.amount);
-            } else if (status == 'rejected' || status == 'expired') {
+            } else if (status == 'rejected') {
               pollTimer?.cancel();
               countdownTimer?.cancel();
             }
@@ -1440,8 +1500,8 @@ class _FinanceScreenState extends State<FinanceScreen> {
                                   const SizedBox(width: 8),
                                   Text(
                                     isExpired
-                                        ? 'Wallet expired — create a new deposit'
-                                        : 'Wallet expires in ${minutes}m ${secs}s',
+                                        ? 'Wallet slot expired — create a new deposit for a fresh address (your request stays pending until admin reviews)'
+                                        : 'Wallet address reserved for ${minutes}m ${secs}s',
                                     style: TextStyle(
                                       color: isExpired ? Colors.red : Colors.white70,
                                       fontSize: 12,
@@ -1453,25 +1513,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                           },
                         ),
                         const SizedBox(height: 16),
-                        if (status == 'expired')
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Row(
-                              children: [
-                                Icon(Icons.timer_off, color: Colors.grey, size: 18),
-                                SizedBox(width: 8),
-                                Text(
-                                  'This deposit has expired. Please create a new deposit.',
-                                  style: TextStyle(color: Colors.grey, fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          )
-                        else if (status == 'rejected')
+                        if (status == 'rejected')
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
@@ -1514,7 +1556,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                           Navigator.of(ctx).pop();
                         },
                         child: Text(
-                          (status == 'rejected' || status == 'expired') ? 'Close' : 'Close & check later',
+                          status == 'rejected' ? 'Close' : 'Close & check later',
                           style: TextStyle(color: c.accentBlue),
                         ),
                       ),
