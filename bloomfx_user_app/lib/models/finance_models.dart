@@ -153,7 +153,7 @@ class FinanceData {
     this.withdrawals = const [],
     this.networks = const [],
     this.minDeposit = 7,
-    this.minWithdrawal = 10,
+    this.minWithdrawal = 1.5,
   });
 
   factory FinanceData.fromJson(Map<String, dynamic> json, {String? userId}) {
@@ -186,7 +186,7 @@ class FinanceData {
           (json['networks'] as List<dynamic>?)?.map((e) => e.toString()).toList() ??
           [],
       minDeposit: (json['minDeposit'] as num?)?.toDouble() ?? 7,
-      minWithdrawal: (json['minWithdrawal'] as num?)?.toDouble() ?? 10,
+      minWithdrawal: (json['minWithdrawal'] as num?)?.toDouble() ?? 1.5,
     );
   }
 }

@@ -1165,7 +1165,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
 
   void _showCryptoWithdrawalModal(DashboardData? data, DashboardProvider dash, User user, AppColors c) {
     final amountController = TextEditingController(
-      text: data?.minWithdrawal.toStringAsFixed(0) ?? '10',
+      text: data?.minWithdrawal.toStringAsFixed(1) ?? '1.5',
     );
     final addressController = TextEditingController();
 
@@ -1204,7 +1204,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Minimum withdrawal \$${data?.minWithdrawal.toStringAsFixed(2) ?? '10.00'}, '
+                'Minimum withdrawal \$${data?.minWithdrawal.toStringAsFixed(2) ?? '1.50'}, '
                 'use USDT(BEP-20) only for withdrawal. '
                 'Withdrawals are processed after admin careful review.',
                 style: TextStyle(color: c.textSecondary, fontSize: 12),
@@ -1244,7 +1244,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                       ? null
                       : () async {
                           final amt = double.tryParse(amountController.text) ?? 0;
-                          if (amt < (data?.minWithdrawal ?? 10)) {
+                          if (amt < (data?.minWithdrawal ?? 1.5)) {
                             Fluttertoast.showToast(
                               msg: 'Minimum withdrawal is \$${data?.minWithdrawal.toStringAsFixed(0)}',
                             );

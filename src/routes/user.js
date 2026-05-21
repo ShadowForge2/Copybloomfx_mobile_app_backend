@@ -28,7 +28,7 @@ const router = Router();
 router.use(authMiddleware);
 
 const MIN_DEPOSIT = 7;
-const MIN_WITHDRAWAL = 10;
+const MIN_WITHDRAWAL = 1.5;
 const DAILY_REWARD_AMOUNT = 0.1;
 const PAIRS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT'];
 
