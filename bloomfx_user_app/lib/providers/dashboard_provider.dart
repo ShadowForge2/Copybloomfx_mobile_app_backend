@@ -629,6 +629,9 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
               : 'Dashboard unavailable';
           if (_data == null) {
             _data = _buildEmptyDashboard(_userId ?? userId);
+            if (_data?.profile != null) {
+              _data = _reconcileRanks(_data!);
+            }
           }
         }
       }
@@ -636,6 +639,9 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
       _errorMessage = 'Failed to load dashboard. Please try again.';
       if (_data == null) {
         _data = _buildEmptyDashboard(_userId ?? userId);
+        if (_data?.profile != null) {
+          _data = _reconcileRanks(_data!);
+        }
       }
     } finally {
       if (showLoading) {
@@ -1223,6 +1229,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Align ladder `isCurrent` with resolved rank (API may use a different rule set).
+  /// Always uses `_seedRanks` colors to ensure rank colors are visible.
   DashboardData _reconcileRanks(DashboardData d) {
     final p = d.profile;
     if (p == null) return d;
@@ -1231,9 +1238,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
       _seedRanks,
     );
     final rid = resolved?.id ?? p.rankId;
-    final ranks = d.ranks.isNotEmpty
-        ? d.ranks.map((r) => r.copyWith(isCurrent: r.id == rid)).toList()
-        : InvestmentLogic.ranksWithCurrentFlag(_seedRanks, rid);
+    final ranks = InvestmentLogic.ranksWithCurrentFlag(_seedRanks, rid);
     final limit =
         resolved?.copyTradesLimit ??
         p.rank?.copyTradesLimit ??
