@@ -31,7 +31,7 @@ class DashboardData {
     this.dailyRewardAmount = 0.1,
     this.copyTradesLimit = 1,
     this.minDeposit = 7.0,
-    this.minWithdrawal = 10.0,
+    this.minWithdrawal = 1.5,
   });
 
   factory DashboardData.fromJson(Map<String, dynamic> json, {String? userId}) {
@@ -78,7 +78,7 @@ class DashboardData {
       dailyRewardAmount: (json['dailyRewardAmount'] as num?)?.toDouble() ?? 0.1,
       copyTradesLimit: json['copyTradesLimit'] as int? ?? 1,
       minDeposit: (json['minDeposit'] as num?)?.toDouble() ?? 7.0,
-      minWithdrawal: (json['minWithdrawal'] as num?)?.toDouble() ?? 10.0,
+      minWithdrawal: (json['minWithdrawal'] as num?)?.toDouble() ?? 1.5,
     );
   }
 }
@@ -226,7 +226,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
   String get apiBaseUrl => _apiService.baseUrl;
 
   static const double MIN_DEPOSIT = 7.0;
-  static const double MIN_WITHDRAWAL = 10.0;
+  static const double MIN_WITHDRAWAL = 1.5;
   static const double DAILY_REWARD_AMOUNT = 0.1;
   static const List<String> PAIRS = [
     'BTC/USDT',
