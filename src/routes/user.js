@@ -5,7 +5,7 @@ import {
   getWithdrawals, createWithdrawal, sumWithdrawals,
   getCopyTrades, countCopyTrades, getTodayCopyTradesSum, createCopyTrade,
   processMatureCopyTrades,
-  getLastDailyReward, createDailyReward,
+  getLastDailyReward, createDailyReward, sumDailyRewards,
   getPromoCodeByCode, getPromoRedemption, createPromoRedemption,
   incrementPromoUsageIfBelowLimit, decrementPromoUsage,
   getNotifications, markNotificationsRead, markNotificationRead,
@@ -208,20 +208,19 @@ router.get('/finance', async (req, res) => {
       req.ip || req.connection.remoteAddress || '',
     );
 
-    const [profile, deposits, withdrawals, totalDeposits, pendingDeposits, totalWithdrawals, dailyRows, ranks] = await Promise.all([
+    const [profile, deposits, withdrawals, totalDeposits, pendingDeposits, totalWithdrawals, dailyRewards, ranks] = await Promise.all([
       getProfile(req.user.id),
       getDeposits({ user_id: req.user.id }, { limit: 100 }),
       getWithdrawals({ user_id: req.user.id }, { limit: 100 }),
       sumDeposits({ user_id: req.user.id, status: 'approved' }),
       sumDeposits({ user_id: req.user.id, status: 'pending' }),
       sumWithdrawals({ user_id: req.user.id, status: 'approved' }),
-      db.from('daily_rewards').select('amount').eq('user_id', req.user.id),
+      sumDailyRewards(req.user.id),
       getAllRanks(),
     ]);
 
     const rank = profile ? ranks.find(r => r.id === profile.rank_id) : null;
     const referralBonus = toNum(profile?.referral_earnings) ?? 0;
-    const dailyRewards = (dailyRows || []).reduce((s, r) => s + toNum(r.amount), 0);
 
     res.json({
       profile: profileToJson(profile, rank),

@@ -98,6 +98,18 @@ async function syncDatabase() {
     }
   }
 
+  // Ensure close_at column exists on copy_trades table (safe migration for SQLite)
+  try {
+    await sequelize.query('ALTER TABLE copy_trades ADD COLUMN "close_at" DATETIME');
+    console.log("[DB] Added column 'close_at' to copy_trades table");
+  } catch (e) {
+    if (e.message && (e.message.includes('duplicate column name') || e.message.includes('already exists'))) {
+      console.log("[DB] Column 'close_at' already exists in copy_trades table (verified)");
+    } else {
+      console.error("[DB] Error adding column 'close_at' to copy_trades:", e.message);
+    }
+  }
+
   // Verify the schema is correct after migration using raw SQLite
   try {
     const result = await sequelize.query('PRAGMA table_info(profiles)', { type: sequelize.QueryTypes.SELECT });
