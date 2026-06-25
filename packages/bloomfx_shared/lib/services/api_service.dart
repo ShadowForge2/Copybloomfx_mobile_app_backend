@@ -170,6 +170,12 @@ class ApiService {
       _post('/api/user/paystack/initialize', body: {'amount': amount});
   Future<ApiResponse> postPaystackVerify(String reference) =>
       _post('/api/user/paystack/verify', body: {'reference': reference});
+  Future<ApiResponse> postCardInitialize({required double amount, String? email}) =>
+      _post('/api/user/card/initialize', body: {'amount': amount, if (email != null) 'email': email});
+  Future<ApiResponse> postCardVerify(String reference) =>
+      _post('/api/user/card/verify', body: {'reference': reference});
+  Future<ApiResponse> postMaxelPayInitialize({required double amount}) =>
+      _post('/api/user/maxelpay/initialize', body: {'amount': amount});
   Future<ApiResponse> redeemPromo(String code) =>
       _post('/api/user/promo/redeem', body: {'code': code});
   Future<ApiResponse> markNotificationsRead({String? notificationId}) =>
