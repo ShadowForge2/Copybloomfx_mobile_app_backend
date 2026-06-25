@@ -1,8 +1,7 @@
 /**
  * Deposit lifecycle:
- * - Crypto pending: stays pending until admin approves/rejects (no auto-expire).
- * - Paystack: auto-approved on verify (not pending).
- * - Approved rows (crypto, promo, referral, Paystack): 30-day lock then principal consumed.
+ * - MaxelPay / Card / Paystack: auto-approved on verify/webhook (no admin needed).
+ * - Approved rows (MaxelPay, Card, Paystack, promo, referral): 30-day lock then principal consumed.
  */
 import {
   getDeposit,
