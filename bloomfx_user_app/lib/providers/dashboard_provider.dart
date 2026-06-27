@@ -1633,6 +1633,202 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  bool _isSubmittingCardDeposit = false;
+  bool get isSubmittingCardDeposit => _isSubmittingCardDeposit;
+
+  Future<Map<String, dynamic>> submitCardDeposit({
+    required double amount,
+    String? email,
+  }) async {
+    if (_isSubmittingCardDeposit) return {'success': false, 'blocked': true};
+    _isSubmittingCardDeposit = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      if (amount < MIN_DEPOSIT) {
+        _errorMessage = 'Minimum deposit is \$$MIN_DEPOSIT';
+        return {'success': false};
+      }
+
+      if (_useLocalOnly || _isDevEnvironment) {
+        if (_data?.profile == null) return {'success': false};
+        var profile = _data!.profile!;
+        var locked = profile.lockedBalance + amount;
+        var earnings = profile.referralEarnings;
+        final bonus = amount * InvestmentLogic.referralPctOnApprovedDeposit;
+        final hasReferrer = profile.referrerId != null && profile.referrerId!.isNotEmpty;
+        if (hasReferrer) {
+          locked += bonus;
+          earnings += bonus;
+        }
+
+        _localDepositSeq += 1;
+        _localDeposits.insert(0, UserDeposit(
+          id: 'ld$_localDepositSeq',
+          amount: amount,
+          network: 'Card',
+          status: 'approved',
+          createdAt: DateTime.now(),
+          expiresAt: DateTime.now().add(Duration(days: InvestmentLogic.lockDays)),
+        ));
+        if (hasReferrer) {
+          _localDepositSeq += 1;
+          _localDeposits.insert(0, UserDeposit(
+            id: 'ld$_localDepositSeq',
+            amount: bonus,
+            network: 'Referral Bonus',
+            status: 'approved',
+            createdAt: DateTime.now(),
+            expiresAt: DateTime.now().add(Duration(days: InvestmentLogic.lockDays)),
+          ));
+        }
+
+        profile = profile.copyWith(lockedBalance: locked, referralEarnings: earnings);
+        profile = InvestmentLogic.withResolvedRank(profile, _seedRanks);
+        _updateDataWithProfile(profile);
+        _rebuildLocalFinanceSnapshot();
+        notifyListeners();
+        return {'success': true};
+      }
+
+      final token = await AuthService.getToken();
+      final api = ApiService(baseUrl: _apiService.baseUrl, authToken: token);
+      final res = await api.postCardInitialize(amount: amount, email: email);
+      if (res.success && res.data != null) {
+        final reference = res.data!['reference']?.toString() ?? '';
+        final authUrl = res.data!['authorization_url']?.toString() ?? '';
+        if (reference.isNotEmpty && authUrl.isNotEmpty) {
+          final uri = Uri.parse(authUrl);
+          if (await canLaunchUrl(uri)) {
+            launchUrl(uri, mode: LaunchMode.inAppWebView);
+          }
+          fetchDashboardData(userId: _userId, showLoading: false);
+          fetchFinance();
+          return {
+            'success': true,
+            'reference': reference,
+            'authorization_url': authUrl,
+          };
+        }
+      }
+      _errorMessage = res.message;
+      return {'success': false};
+    } finally {
+      _isSubmittingCardDeposit = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> verifyCardPayment(String reference) async {
+    _errorMessage = null;
+    try {
+      final token = await AuthService.getToken();
+      final api = ApiService(baseUrl: _apiService.baseUrl, authToken: token);
+      final verify = await api.postCardVerify(reference);
+      if (verify.data?['status'] == 'success') {
+        await fetchDashboardData(userId: _userId, showLoading: false);
+        await fetchFinance();
+        return true;
+      }
+      _errorMessage =
+          verify.data?['message']?.toString() ??
+          verify.message ??
+          'Card payment not yet confirmed. Try again.';
+      notifyListeners();
+      return false;
+    } catch (e) {
+      _errorMessage = 'Card payment verification failed. Please try again.';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  bool _isSubmittingMaxelPayDeposit = false;
+  bool get isSubmittingMaxelPayDeposit => _isSubmittingMaxelPayDeposit;
+
+  Future<Map<String, dynamic>> submitMaxelPayDeposit({
+    required double amount,
+  }) async {
+    if (_isSubmittingMaxelPayDeposit) return {'success': false, 'blocked': true};
+    _isSubmittingMaxelPayDeposit = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      if (amount < MIN_DEPOSIT) {
+        _errorMessage = 'Minimum deposit is \$$MIN_DEPOSIT';
+        return {'success': false};
+      }
+
+      if (_useLocalOnly || _isDevEnvironment) {
+        if (_data?.profile == null) return {'success': false};
+        var profile = _data!.profile!;
+        var locked = profile.lockedBalance + amount;
+        var earnings = profile.referralEarnings;
+        final bonus = amount * InvestmentLogic.referralPctOnApprovedDeposit;
+        final hasReferrer = profile.referrerId != null && profile.referrerId!.isNotEmpty;
+        if (hasReferrer) {
+          locked += bonus;
+          earnings += bonus;
+        }
+
+        _localDepositSeq += 1;
+        final depId = 'ld$_localDepositSeq';
+        _localDeposits.insert(0, UserDeposit(
+          id: depId,
+          amount: amount,
+          network: 'MaxelPay',
+          status: 'approved',
+          createdAt: DateTime.now(),
+          expiresAt: DateTime.now().add(Duration(days: InvestmentLogic.lockDays)),
+        ));
+        if (hasReferrer) {
+          _localDepositSeq += 1;
+          _localDeposits.insert(0, UserDeposit(
+            id: 'ld$_localDepositSeq',
+            amount: bonus,
+            network: 'Referral Bonus',
+            status: 'approved',
+            createdAt: DateTime.now(),
+            expiresAt: DateTime.now().add(Duration(days: InvestmentLogic.lockDays)),
+          ));
+        }
+
+        profile = profile.copyWith(lockedBalance: locked, referralEarnings: earnings);
+        profile = InvestmentLogic.withResolvedRank(profile, _seedRanks);
+        _updateDataWithProfile(profile);
+        _rebuildLocalFinanceSnapshot();
+        notifyListeners();
+        return {'success': true, 'deposit_id': depId};
+      }
+
+      final token = await AuthService.getToken();
+      final api = ApiService(baseUrl: _apiService.baseUrl, authToken: token);
+      final res = await api.postMaxelPayInitialize(amount: amount);
+      if (res.success && res.data != null) {
+        final checkoutUrl = res.data!['checkoutUrl']?.toString() ?? '';
+        final depositId = res.data!['id']?.toString() ?? '';
+        if (checkoutUrl.isNotEmpty) {
+          final uri = Uri.parse(checkoutUrl);
+          if (await canLaunchUrl(uri)) {
+            launchUrl(uri, mode: LaunchMode.inAppWebView);
+          }
+          fetchDashboardData(userId: _userId, showLoading: false);
+          fetchFinance();
+          return {
+            'success': true,
+            'checkoutUrl': checkoutUrl,
+            'deposit_id': depositId,
+          };
+        }
+      }
+      _errorMessage = res.message;
+      return {'success': false};
+    } finally {
+      _isSubmittingMaxelPayDeposit = false;
+      notifyListeners();
+    }
+  }
+
   Future<bool> verifyPaystackPayment(String reference) async {
     _errorMessage = null;
     try {

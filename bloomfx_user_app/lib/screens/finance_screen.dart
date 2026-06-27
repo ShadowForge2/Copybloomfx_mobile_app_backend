@@ -613,20 +613,32 @@ class _FinanceScreenState extends State<FinanceScreen> {
             const SizedBox(height: 20),
             _buildDepositOption(
               icon: Icons.currency_bitcoin,
-              title: 'Crypto',
-              subtitle: 'USDT BEP-20, ERC-20, Solana, etc. — admin approval required',
+              title: 'Crypto (MaxelPay)',
+              subtitle: 'USDT, BTC, ETH, and more — instant crypto via MaxelPay gateway',
               color: Colors.orange,
               onTap: () {
                 Navigator.pop(context);
-                _showCryptoDepositModal(data, dash, c);
+                _showMaxelPayDepositModal(data, dash, c);
+              },
+              c: c,
+            ),
+            const SizedBox(height: 12),
+            _buildDepositOption(
+              icon: Icons.credit_card,
+              title: 'Card (Paystack)',
+              subtitle: 'Pay with debit/credit card — auto-verified, no admin needed',
+              color: Colors.blue,
+              onTap: () {
+                Navigator.pop(context);
+                _showCardDepositModal(data, dash, c);
               },
               c: c,
             ),
             const SizedBox(height: 12),
             _buildDepositOption(
               icon: Icons.account_balance,
-              title: 'Local (Paystack)',
-              subtitle: 'Pay with card, bank transfer, USSD — auto-verified, no admin needed',
+              title: 'Bank Transfer / USSD',
+              subtitle: 'Pay with bank transfer or USSD via Paystack — auto-verified',
               color: Colors.green,
               onTap: () {
                 Navigator.pop(context);
@@ -700,13 +712,11 @@ class _FinanceScreenState extends State<FinanceScreen> {
     );
   }
 
-  void _showCryptoDepositModal(DashboardData? data, DashboardProvider dash, AppColors c) {
-    _amountController.text = data?.minDeposit.toStringAsFixed(0) ?? '7';
-    final networks = _networksFor(dash);
-    if (!networks.contains(_selectedNetwork)) {
-      _selectedNetwork = networks.first;
-    }
-    bool isProcessing = false;
+  void _showMaxelPayDepositModal(DashboardData? data, DashboardProvider dash, AppColors c) {
+    final amountController = TextEditingController(
+      text: data?.minDeposit.toStringAsFixed(0) ?? '7',
+    );
+    final processingNotifier = ValueNotifier<bool>(false);
 
     showModalBottomSheet(
       context: context,
@@ -715,135 +725,450 @@ class _FinanceScreenState extends State<FinanceScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-            top: 20,
-            left: 20,
-            right: 20,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final isProcessing = processingNotifier.value;
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+                top: 20,
+                left: 20,
+                right: 20,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.currency_bitcoin, color: Colors.orange, size: 22),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Crypto (MaxelPay)',
+                        style: TextStyle(
+                          color: c.textPrimary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Minimum \$${data?.minDeposit.toStringAsFixed(2) ?? '7.00'}. Pay with USDT, BTC, ETH and more via MaxelPay.',
+                    style: TextStyle(color: c.textSecondary, fontSize: 12),
+                  ),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: amountController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: TextStyle(color: c.textPrimary),
+                    decoration: InputDecoration(
+                      labelText: 'Amount (USD)',
+                      prefixIcon: const Icon(Icons.attach_money),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      filled: true,
+                      fillColor: c.surfaceBg,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: isProcessing
+                          ? null
+                          : () async {
+                              final amt = double.tryParse(amountController.text) ?? 0;
+                              if (amt < (data?.minDeposit ?? 7)) {
+                                Fluttertoast.showToast(
+                                  msg: 'Minimum deposit is \$${data?.minDeposit.toStringAsFixed(0)}',
+                                );
+                                return;
+                              }
+                              setModalState(() => processingNotifier.value = true);
+                              final result = await dash.submitMaxelPayDeposit(amount: amt);
+                              if (!context.mounted) return;
+                              Navigator.pop(context);
+                              if (result['success'] == true) {
+                                final depositId = result['deposit_id'] as String?;
+                                if (depositId != null) {
+                                  _showPendingMaxelPayDialog(depositId, amt, dash, c);
+                                } else {
+                                  Fluttertoast.showToast(
+                                    msg: 'Payment initiated. Check your transaction history for status.',
+                                    backgroundColor: Colors.green,
+                                    textColor: Colors.white,
+                                  );
+                                }
+                              } else {
+                                Fluttertoast.showToast(
+                                  msg: dash.errorMessage ?? 'Payment initiation failed',
+                                  backgroundColor: Colors.red,
+                                  textColor: Colors.white,
+                                );
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: isProcessing
+                          ? const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 18, height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                ),
+                                SizedBox(width: 10),
+                                Text('Processing...'),
+                              ],
+                            )
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.open_in_browser, size: 20),
+                                SizedBox(width: 8),
+                                Text('Pay with MaxelPay'),
+                              ],
+                            ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: Text(
+                      'Secured by MaxelPay — No KYC required',
+                      style: TextStyle(color: c.textSecondary, fontSize: 11),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showPendingMaxelPayDialog(String depositId, double amount, DashboardProvider dash, AppColors c) {
+    final userId = context.read<AuthProvider>().user?.id;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          backgroundColor: c.surfaceBg,
+          title: Row(
+            children: [
+              const Icon(Icons.currency_bitcoin, color: Colors.orange, size: 24),
+              const SizedBox(width: 8),
+              Text('Payment Initiated', style: TextStyle(color: c.textPrimary)),
+            ],
           ),
-          child: Column(
+          content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.currency_bitcoin, color: Colors.orange, size: 22),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Crypto Deposit',
-                    style: TextStyle(
-                      color: c.textPrimary,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
               Text(
-                'Minimum \$${data?.minDeposit.toStringAsFixed(2) ?? '7.00'}. Pending admin approval required.',
-                style: TextStyle(color: c.textSecondary, fontSize: 12),
-              ),
-              const SizedBox(height: 20),
-              InputDecorator(
-                decoration: InputDecoration(
-                  labelText: 'Network',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  filled: true,
-                  fillColor: c.surfaceBg,
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    isExpanded: true,
-                    value: _selectedNetwork,
-                    dropdownColor: c.surfaceBg,
-                    style: TextStyle(color: c.textPrimary),
-                    items: networks
-                        .map(
-                          (n) => DropdownMenuItem(
-                            value: n,
-                            child: Text(n, style: TextStyle(color: c.textPrimary)),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (val) {
-                      if (val != null) setModalState(() => _selectedNetwork = val);
-                    },
-                  ),
-                ),
+                'Complete your payment in the MaxelPay window. '
+                'Your deposit of \$${amount.toStringAsFixed(2)} will be auto-credited once confirmed.',
+                style: const TextStyle(color: Colors.white70),
               ),
               const SizedBox(height: 16),
-              TextField(
-                controller: _amountController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style: TextStyle(color: c.textPrimary),
-                decoration: InputDecoration(
-                  labelText: 'Amount (USDT)',
-                  prefixIcon: const Icon(Icons.attach_money),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  filled: true,
-                  fillColor: c.surfaceBg,
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: isProcessing
-                      ? null
-                      : () async {
-                          final amt = double.tryParse(_amountController.text) ?? 0;
-                          if (amt < (data?.minDeposit ?? 7)) {
-                            Fluttertoast.showToast(
-                              msg: 'Minimum deposit is \$${data?.minDeposit.toStringAsFixed(0)}',
-                            );
-                            return;
-                          }
-                          setModalState(() => isProcessing = true);
-                          final dep = await dash.submitDeposit(
-                            amount: amt,
-                            network: _selectedNetwork,
-                          );
-                          if (!context.mounted) return;
-                          Navigator.pop(context);
-                          if (dep != null) {
-                            context.read<NotificationProvider>().fetchNotifications();
-                            NotificationService.instance.showDepositPending(dep.amount);
-                            _showPendingDepositDialog(dep, dash, c);
-                          } else {
-                            Fluttertoast.showToast(
-                              msg: dash.errorMessage ?? 'Deposit request failed',
-                              backgroundColor: Colors.red,
-                              textColor: Colors.white,
-                            );
-                          }
-                        },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                    foregroundColor: Colors.white,
+              Center(
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      Navigator.pop(dialogCtx);
+                      await dash.fetchDashboardData(userId: userId, showLoading: false);
+                      await dash.fetchFinance();
+                      Fluttertoast.showToast(
+                        msg: 'Checking payment status...',
+                        backgroundColor: Colors.orange,
+                        textColor: Colors.white,
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Check Status'),
                   ),
-                  child: isProcessing
-                      ? const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: 18, height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            ),
-                            SizedBox(width: 10),
-                            Text('Processing...'),
-                          ],
-                        )
-                      : const Text('Submit crypto deposit'),
                 ),
               ),
-              const SizedBox(height: 20),
             ],
           ),
-        ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showCardDepositModal(DashboardData? data, DashboardProvider dash, AppColors c) {
+    final emailController = TextEditingController();
+    final amountController = TextEditingController(
+      text: data?.minDeposit.toStringAsFixed(0) ?? '7',
+    );
+    final processingNotifier = ValueNotifier<bool>(false);
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: c.cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final isProcessing = processingNotifier.value;
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+                top: 20,
+                left: 20,
+                right: 20,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.credit_card, color: Colors.blue, size: 22),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Card Deposit (Paystack)',
+                        style: TextStyle(
+                          color: c.textPrimary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Pay with your debit or credit card. Auto-verified, no admin needed.',
+                    style: TextStyle(color: c.textSecondary, fontSize: 12),
+                  ),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: amountController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    style: TextStyle(color: c.textPrimary),
+                    decoration: InputDecoration(
+                      labelText: 'Amount (USD)',
+                      prefixIcon: const Icon(Icons.attach_money),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      filled: true,
+                      fillColor: c.surfaceBg,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    style: TextStyle(color: c.textPrimary),
+                    decoration: InputDecoration(
+                      labelText: 'Email (for payment receipt)',
+                      prefixIcon: const Icon(Icons.email),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      filled: true,
+                      fillColor: c.surfaceBg,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: isProcessing
+                          ? null
+                          : () async {
+                              final amt = double.tryParse(amountController.text) ?? 0;
+                              if (amt < (data?.minDeposit ?? 7)) {
+                                Fluttertoast.showToast(
+                                  msg: 'Minimum deposit is \$${data?.minDeposit.toStringAsFixed(0)}',
+                                );
+                                return;
+                              }
+                              setModalState(() => processingNotifier.value = true);
+                              final result = await dash.submitCardDeposit(
+                                amount: amt,
+                                email: emailController.text.trim(),
+                              );
+                              if (!context.mounted) return;
+                              Navigator.pop(context);
+                              if (result['success'] == true) {
+                                final reference = result['reference'] as String?;
+                                if (reference != null) {
+                                  await showDialog<void>(
+                                    context: context,
+                                    builder: (dialogCtx) => AlertDialog(
+                                      backgroundColor: c.surfaceBg,
+                                      title: Row(
+                                        children: [
+                                          const Icon(Icons.check_circle, color: Colors.blue, size: 24),
+                                          const SizedBox(width: 8),
+                                          Text('Card Payment Submitted', style: TextStyle(color: c.textPrimary)),
+                                        ],
+                                      ),
+                                      content: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'Complete your card payment in the popup, then tap Verify below.',
+                                            style: TextStyle(color: Colors.white70),
+                                          ),
+                                          const SizedBox(height: 16),
+                                          Text(
+                                            'Reference: $reference',
+                                            style: const TextStyle(color: Colors.grey, fontSize: 12),
+                                          ),
+                                          const SizedBox(height: 16),
+                                          SizedBox(
+                                            width: double.infinity,
+                                            child: ElevatedButton(
+                                              onPressed: () async {
+                                                final verified = await dash.verifyCardPayment(reference);
+                                                if (!dialogCtx.mounted) return;
+                                                Navigator.pop(dialogCtx);
+                                                if (verified) {
+                                                  if (!context.mounted) return;
+                                                  await showDialog<void>(
+                                                    context: context,
+                                                    builder: (successCtx) => AlertDialog(
+                                                      backgroundColor: c.surfaceBg,
+                                                      title: Row(
+                                                        children: [
+                                                          const Icon(Icons.check_circle, color: Colors.green, size: 24),
+                                                          const SizedBox(width: 8),
+                                                          Text('Payment successful', style: TextStyle(color: c.textPrimary)),
+                                                        ],
+                                                      ),
+                                                      content: Text(
+                                                        'Your card deposit of \$${amt.toStringAsFixed(2)} has been confirmed and credited to your tradable balance.',
+                                                        style: const TextStyle(color: Colors.white70),
+                                                      ),
+                                                      actions: [
+                                                        TextButton(
+                                                          onPressed: () => Navigator.pop(successCtx),
+                                                          child: const Text('OK'),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                } else {
+                                                  if (!context.mounted) return;
+                                                  Fluttertoast.showToast(
+                                                    msg: dash.errorMessage ?? 'Card payment not yet confirmed. Try again.',
+                                                    backgroundColor: Colors.orange,
+                                                    textColor: Colors.white,
+                                                  );
+                                                }
+                                              },
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.blue,
+                                                foregroundColor: Colors.white,
+                                              ),
+                                              child: const Text('Verify Payment'),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(dialogCtx),
+                                          child: const Text('Cancel'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                } else {
+                                  await showDialog<void>(
+                                    context: context,
+                                    builder: (dialogCtx) => AlertDialog(
+                                      backgroundColor: c.surfaceBg,
+                                      title: Row(
+                                        children: [
+                                          const Icon(Icons.check_circle, color: Colors.green, size: 24),
+                                          const SizedBox(width: 8),
+                                          Text('Card payment successful', style: TextStyle(color: c.textPrimary)),
+                                        ],
+                                      ),
+                                      content: Text(
+                                        'Your card deposit of \$${amt.toStringAsFixed(2)} has been confirmed and credited to your tradable balance.',
+                                        style: const TextStyle(color: Colors.white70),
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(dialogCtx),
+                                          child: const Text('OK'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                              } else {
+                                Fluttertoast.showToast(
+                                  msg: dash.errorMessage ?? 'Card payment failed',
+                                  backgroundColor: Colors.red,
+                                  textColor: Colors.white,
+                                );
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: isProcessing
+                          ? const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                ),
+                                SizedBox(width: 10),
+                                Text('Processing...'),
+                              ],
+                            )
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.credit_card, size: 20),
+                                SizedBox(width: 8),
+                                Text('Pay with Card'),
+                              ],
+                            ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: Text(
+                      'Secured by Paystack',
+                      style: TextStyle(color: c.textSecondary, fontSize: 11),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -1327,7 +1652,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
         pollTimer = Timer.periodic(pollInterval, (_) async {
           final token = await AuthService.getToken();
           if (token == null) return;
-          final apiService = ApiService(baseUrl: 'https://copybloomfx-mobile-app-backend.onrender.com', authToken: token);
+          final apiService = ApiService(baseUrl: 'https://copybloomfx-mobile-app-backend-dmgy.onrender.com', authToken: token);
           final res = await apiService.getDepositStatus(dep.id);
           if (res.success && res.data != null) {
             final status = res.data!['status']?.toString() ?? 'pending';
