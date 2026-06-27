@@ -25,6 +25,9 @@ build/
 .chrome_admin/
 .chrome_user/
 
+# SQLite database
+persistent_database/bloomfx_dev.db
+
 # Node / reward system
 reward-system/node_modules/
 
