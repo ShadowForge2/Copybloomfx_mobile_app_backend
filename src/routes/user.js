@@ -26,6 +26,99 @@ import { createPaymentSession, verifyWebhookSignature } from '../utils/maxelpay.
 import { payReferralCommission } from '../services/referralCommission.js';
 
 const router = Router();
+
+// MaxelPay webhook & redirect routes — must be before authMiddleware (webhooks have no token)
+router.post('/maxelpay/webhook', async (req, res) => {
+  try {
+    const signature = req.headers['x-maxelpay-signature'];
+    if (!signature || !verifyWebhookSignature(req.body, signature)) {
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+
+    const { event, data } = req.body;
+    if (event !== 'payment.completed' && event !== 'payment.partial' && event !== 'payment.overpaid') {
+      return res.status(200).json({ received: true, status: 'ignored' });
+    }
+
+    const orderId = data.orderId;
+    if (!orderId) return res.status(200).json({ received: true, status: 'no_order_id' });
+
+    const sessionId = data.sessionId;
+    const reference = sessionId || orderId;
+
+    const deposits = await getDeposits({ reference, network: 'MaxelPay' });
+    if (!deposits.length) return res.status(200).json({ received: true, status: 'deposit_not_found' });
+
+    const deposit = deposits[0];
+    if (deposit.status !== 'pending') return res.status(200).json({ received: true, status: 'already_processed' });
+
+    const paidAmount = data.totalPaidUsd || data.paidAmount || data.amount || toNum(deposit.amount);
+    const approvedAt = new Date();
+
+    await updateDeposit(deposit.id, {
+      status: 'approved',
+      approved_at: approvedAt,
+      expires_at: approvedLockExpiresAt(approvedAt),
+    });
+
+    const profile = await getProfile(deposit.user_id);
+    if (profile) {
+      await updateProfile(deposit.user_id, {
+        locked_balance: toNum(profile.locked_balance) + paidAmount,
+      });
+    }
+
+    await updateUserRank(deposit.user_id);
+
+    const referrerId = await resolveReferrerUserId(deposit.user_id);
+    if (referrerId && referrerId !== deposit.user_id) {
+      const commission = await payReferralCommission({
+        referrerId,
+        refereeId: deposit.user_id,
+        depositId: deposit.id,
+        depositAmount: paidAmount,
+        walletNetwork: 'MaxelPay',
+      });
+      if (commission.paid) await updateUserRank(referrerId);
+    }
+
+    createNotification(deposit.user_id, 'Deposit Approved', `Your MaxelPay deposit of $${paidAmount.toFixed(2)} has been confirmed and credited to your tradable balance.`, 'success').catch(() => {});
+
+    res.status(200).json({ received: true, status: 'success' });
+  } catch (e) {
+    console.error('MaxelPay webhook error:', e);
+    res.status(200).json({ received: true, status: 'error', message: e.message });
+  }
+});
+
+router.get('/maxelpay/success', async (req, res) => {
+  const { orderId } = req.query;
+  if (orderId) {
+    const deposits = await getDeposits({ reference: orderId, network: 'MaxelPay' }).catch(() => []);
+    if (deposits.length && deposits[0].status === 'pending') {
+      const approvedAt = new Date();
+      await updateDeposit(deposits[0].id, {
+        status: 'approved',
+        approved_at: approvedAt,
+        expires_at: approvedLockExpiresAt(approvedAt),
+      }).catch(() => {});
+      const profile = await getProfile(deposits[0].user_id).catch(() => null);
+      if (profile) {
+        await updateProfile(deposits[0].user_id, {
+          locked_balance: toNum(profile.locked_balance) + toNum(deposits[0].amount),
+        }).catch(() => {});
+      }
+    }
+    const redirectUrl = `${process.env.CORS_ORIGIN || 'https://copybloomfx.com'}/payment/success?orderId=${orderId}`;
+    return res.redirect(redirectUrl);
+  }
+  res.redirect(process.env.CORS_ORIGIN || 'https://copybloomfx.com');
+});
+
+router.get('/maxelpay/cancel', (_req, res) => {
+  res.redirect(`${process.env.CORS_ORIGIN || 'https://copybloomfx.com'}/payment/cancel`);
+});
+
 router.use(authMiddleware);
 
 const MIN_DEPOSIT = 7;
@@ -824,97 +917,6 @@ router.post('/maxelpay/initialize', async (req, res) => {
     console.error('[MAXELPAY] Initialize error:', e.message, e.details ? `details: ${e.details}` : '', e.code ? `code: ${e.code}` : '');
     res.status(500).json({ error: e.message });
   }
-});
-
-// MaxelPay webhook callback — receives payment.completed / payment.failed events
-router.post('/maxelpay/webhook', async (req, res) => {
-  try {
-    const signature = req.headers['x-maxelpay-signature'];
-    if (!signature || !verifyWebhookSignature(req.body, signature)) {
-      return res.status(401).json({ error: 'Invalid signature' });
-    }
-
-    const { event, data } = req.body;
-    if (event !== 'payment.completed' && event !== 'payment.partial' && event !== 'payment.overpaid') {
-      return res.status(200).json({ received: true, status: 'ignored' });
-    }
-
-    const orderId = data.orderId;
-    if (!orderId) return res.status(200).json({ received: true, status: 'no_order_id' });
-
-    const sessionId = data.sessionId;
-    const reference = sessionId || orderId;
-
-    const deposits = await getDeposits({ reference, network: 'MaxelPay' });
-    if (!deposits.length) return res.status(200).json({ received: true, status: 'deposit_not_found' });
-
-    const deposit = deposits[0];
-    if (deposit.status !== 'pending') return res.status(200).json({ received: true, status: 'already_processed' });
-
-    const paidAmount = data.totalPaidUsd || data.paidAmount || data.amount || toNum(deposit.amount);
-    const approvedAt = new Date();
-
-    await updateDeposit(deposit.id, {
-      status: 'approved',
-      approved_at: approvedAt,
-      expires_at: approvedLockExpiresAt(approvedAt),
-    });
-
-    const profile = await getProfile(deposit.user_id);
-    if (profile) {
-      await updateProfile(deposit.user_id, {
-        locked_balance: toNum(profile.locked_balance) + paidAmount,
-      });
-    }
-
-    await updateUserRank(deposit.user_id);
-
-    const referrerId = await resolveReferrerUserId(deposit.user_id);
-    if (referrerId && referrerId !== deposit.user_id) {
-      const commission = await payReferralCommission({
-        referrerId,
-        refereeId: deposit.user_id,
-        depositId: deposit.id,
-        depositAmount: paidAmount,
-        walletNetwork: 'MaxelPay',
-      });
-      if (commission.paid) await updateUserRank(referrerId);
-    }
-
-    createNotification(deposit.user_id, 'Deposit Approved', `Your MaxelPay deposit of $${paidAmount.toFixed(2)} has been confirmed and credited to your tradable balance.`, 'success').catch(() => {});
-
-    res.status(200).json({ received: true, status: 'success' });
-  } catch (e) {
-    console.error('MaxelPay webhook error:', e);
-    res.status(200).json({ received: true, status: 'error', message: e.message });
-  }
-});
-
-// MaxelPay success redirect landing — updates deposit if webhook hasn't arrived yet
-router.get('/maxelpay/success', async (req, res) => {
-  const { orderId } = req.query;
-  if (orderId) {
-    const deposits = await getDeposits({ reference: orderId, network: 'MaxelPay' }).catch(() => []);
-    if (deposits.length && deposits[0].status === 'pending') {
-      const approvedAt = new Date();
-      await updateDeposit(deposits[0].id, {
-        status: 'approved',
-        approved_at: approvedAt,
-        expires_at: approvedLockExpiresAt(approvedAt),
-      }).catch(() => {});
-      const profile = await getProfile(deposits[0].user_id).catch(() => null);
-      if (profile) {
-        await updateProfile(deposits[0].user_id, {
-          locked_balance: toNum(profile.locked_balance) + toNum(deposits[0].amount),
-        }).catch(() => {});
-      }
-    }
-  }
-  res.redirect(`${process.env.CORS_ORIGIN || ''}/finance?payment=success`);
-});
-
-router.get('/maxelpay/cancel', (req, res) => {
-  res.redirect(`${process.env.CORS_ORIGIN || ''}/finance?payment=cancelled`);
 });
 
 // Paystack webhook callback — receives charge.success events
