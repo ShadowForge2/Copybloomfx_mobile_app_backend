@@ -199,19 +199,18 @@ export async function createDeposit(data) {
   if (USE_SQLITE) {
     const id = crypto.randomUUID();
     const { user_id, amount, network, wallet_address, status, reference, referrer_id, expires_at, approved_at } = data;
-    await sequelize.query(
+    const [rows] = await sequelize.query(
       `INSERT INTO deposits (id, user_id, amount, network, wallet_address, status, reference, referrer_id, expires_at, approved_at, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
       {
         replacements: [id, user_id, amount, network || null, wallet_address || null, status || 'pending', reference || null, referrer_id || null, expires_at || null, approved_at || null],
-        type: sequelize.QueryTypes.INSERT,
       },
     );
-    const [rows] = await sequelize.query(
+    const [fetched] = await sequelize.query(
       `SELECT * FROM deposits WHERE id = ?`,
-      { replacements: [id], type: sequelize.QueryTypes.SELECT },
+      { replacements: [id] },
     );
-    return rows;
+    return Array.isArray(fetched) ? fetched[0] : fetched;
   }
   const { data: result, error } = await supabase.from('deposits').insert(data).select().single();
   if (error) throw error;
