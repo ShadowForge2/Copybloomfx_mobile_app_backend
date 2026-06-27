@@ -213,7 +213,10 @@ export async function createDeposit(data) {
     return Array.isArray(fetched) ? fetched[0] : fetched;
   }
   const { data: result, error } = await supabase.from('deposits').insert(data).select().single();
-  if (error) throw error;
+  if (error) {
+    console.error('[createDeposit] Supabase error:', JSON.stringify({ message: error.message, details: error.details, hint: error.hint, code: error.code }));
+    throw error;
+  }
   return result;
 }
 

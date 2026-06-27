@@ -821,13 +821,14 @@ router.post('/maxelpay/initialize', async (req, res) => {
       createdAt: deposit.created_at,
     });
   } catch (e) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('[MAXELPAY] Initialize error:', e.message, e.stack?.split('\n').slice(0, 4).join('\n'));
-    }
-    res.status(500).json({ error: e.message });
+    console.error('[MAXELPAY] Initialize error:', e.message, e.details, e.hint, e.code);
+    if (e.stack) console.error('[MAXELPAY] Stack:', e.stack.split('\n').slice(0, 4).join('\n'));
+    const errorPayload = { message: e.message };
+    if (e.details) errorPayload.details = e.details;
+    if (e.code) errorPayload.code = e.code;
+    res.status(500).json({ error: JSON.stringify(errorPayload) });
   }
 });
-
 
 // MaxelPay webhook callback — receives payment.completed / payment.failed events
 router.post('/maxelpay/webhook', async (req, res) => {
