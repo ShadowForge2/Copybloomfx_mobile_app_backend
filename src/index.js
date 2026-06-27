@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import { sequelize } from './config/database.js';
 import { syncDatabase } from './models/index.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
@@ -62,6 +63,18 @@ app.get('/health', (_, res) => {
 });
 
 app.get('/api/health', (_, res) => res.json({ ok: true, uptime: process.uptime() }));
+
+// Diagnostic endpoint — check deposits table schema (no auth required)
+app.get('/api/debug/deposits-schema', async (_req, res) => {
+  try {
+    if (process.env.USE_SQLITE !== 'true') return res.json({ dialect: 'supabase' });
+    const tableInfo = await sequelize.query('PRAGMA table_info(deposits)', { type: sequelize.QueryTypes.SELECT });
+    const columns = tableInfo.map(r => ({ name: r.name, type: r.type, notNull: !!r.notnull }));
+    res.json({ table: 'deposits', columns, count: columns.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found' });

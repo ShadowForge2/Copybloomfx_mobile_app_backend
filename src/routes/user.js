@@ -12,7 +12,6 @@ import {
   getProfileByReferralCode, getProfilesByReferredBy, getReferrals,
   createNotification, createAuditLog,
 } from '../config/data.js';
-import { sequelize } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { toNum, isSameDay, getMidnightWAT, normalizePromoCode, randomPromoBonus } from '../utils/helpers.js';
 import {
@@ -25,8 +24,6 @@ import { NETWORKS, assignWallet, getAssignment, releaseAssignment } from '../uti
 import { paystackInit, paystackVerify, convertNGNtoUSD } from '../utils/paystack.js';
 import { createPaymentSession, verifyWebhookSignature } from '../utils/maxelpay.js';
 import { payReferralCommission } from '../services/referralCommission.js';
-
-const USE_SQLITE = process.env.USE_SQLITE === 'true';
 
 const router = Router();
 router.use(authMiddleware);
@@ -831,17 +828,6 @@ router.post('/maxelpay/initialize', async (req, res) => {
   }
 });
 
-// Diagnostic endpoint — check deposits table schema
-router.get('/debug/deposits-schema', async (req, res) => {
-  try {
-    if (!USE_SQLITE) return res.json({ dialect: 'supabase' });
-    const tableInfo = await sequelize.query('PRAGMA table_info(deposits)', { type: sequelize.QueryTypes.SELECT });
-    const columns = tableInfo.map(r => ({ name: r.name, type: r.type, notNull: !!r.notnull }));
-    res.json({ table: 'deposits', columns, count: columns.length });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // MaxelPay webhook callback — receives payment.completed / payment.failed events
 router.post('/maxelpay/webhook', async (req, res) => {
