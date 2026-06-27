@@ -35,7 +35,7 @@ export function isPendingPaymentExpired() {
   return false;
 }
 
-const MAXELPAY_PENDING_MINUTES = 30; /** auto-reject MaxelPay pending after 30 min — user has 30 min to complete payment */
+const MAXELPAY_PENDING_MINUTES = 15; /** auto-reject MaxelPay pending after 15 min — user has 15 min to complete payment */
 
 export function isApprovedLockExpired(deposit, now = new Date()) {
   if (deposit.status !== 'approved') return false;
