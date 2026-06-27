@@ -821,12 +821,8 @@ router.post('/maxelpay/initialize', async (req, res) => {
       createdAt: deposit.created_at,
     });
   } catch (e) {
-    console.error('[MAXELPAY] Initialize error:', e.message, e.details, e.hint, e.code);
-    if (e.stack) console.error('[MAXELPAY] Stack:', e.stack.split('\n').slice(0, 4).join('\n'));
-    const errorPayload = { message: e.message };
-    if (e.details) errorPayload.details = e.details;
-    if (e.code) errorPayload.code = e.code;
-    res.status(500).json({ error: JSON.stringify(errorPayload) });
+    console.error('[MAXELPAY] Initialize error:', e.message, e.details ? `details: ${e.details}` : '', e.code ? `code: ${e.code}` : '');
+    res.status(500).json({ error: e.message });
   }
 });
 
