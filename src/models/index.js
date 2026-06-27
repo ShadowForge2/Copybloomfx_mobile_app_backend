@@ -110,24 +110,12 @@ async function syncDatabase() {
     }
   }
 
-  // Ensure all expected columns exist on deposits table (safe migration for SQLite)
-  const depositColumns = [
-    { name: 'reference', type: 'TEXT' },
-    { name: 'referrer_id', type: 'TEXT' },
-    { name: 'expires_at', type: 'DATETIME' },
-    { name: 'approved_at', type: 'DATETIME' },
-  ];
-  for (const { name, type } of depositColumns) {
-    try {
-      await sequelize.query(`ALTER TABLE deposits ADD COLUMN "${name}" ${type}`);
-      console.log(`[DB] Added column '${name}' to deposits table`);
-    } catch (e) {
-      if (e.message && (e.message.includes('duplicate column name') || e.message.includes('already exists'))) {
-        console.log(`[DB] Column '${name}' already exists in deposits table (verified)`);
-      } else {
-        console.error(`[DB] Error adding column '${name}' to deposits:`, e.message);
-      }
-    }
+  // Force Sequelize to re-sync deposits schema to clear schema cache
+  try {
+    await Deposit.sync({ alter: true });
+    console.log('[DB] Deposits schema synced (alter applied if columns were missing)');
+  } catch (e) {
+    console.error('[DB] Error syncing deposits schema:', e.message);
   }
 
   // Verify the schema is correct after migration using raw SQLite
