@@ -214,6 +214,7 @@ export async function createDeposit(data) {
   }
   const id = crypto.randomUUID();
   const { user_id, amount, network, wallet_address, status, reference, referrer_id, expires_at, approved_at } = data;
+  // Use raw SQL via supabase.rest + PostgreSQL function to bypass schema cache issues
   const { data: result, error } = await supabase.rpc('insert_deposit', {
     p_id: id,
     p_user_id: user_id,
@@ -227,6 +228,24 @@ export async function createDeposit(data) {
     p_approved_at: approved_at || null,
   });
   if (error) {
+    // Fallback: create deposit without reference column if it doesn't exist in Supabase
+    if (error.code === '42703') {
+      console.warn('[createDeposit] reference column missing, inserting without it');
+      const insertData = { id, user_id, amount };
+      if (network) insertData.network = network;
+      if (wallet_address) insertData.wallet_address = wallet_address;
+      if (status) insertData.status = status;
+      if (referrer_id) insertData.referrer_id = referrer_id;
+      if (expires_at) insertData.expires_at = expires_at;
+      if (approved_at) insertData.approved_at = approved_at;
+      const { data: fallback, error: fallbackErr } = await supabase
+        .from('deposits')
+        .insert(insertData)
+        .select()
+        .single();
+      if (fallbackErr) throw fallbackErr;
+      return fallback;
+    }
     console.error('[createDeposit] RPC error:', JSON.stringify({ message: error.message, details: error.details, hint: error.hint, code: error.code }));
     throw error;
   }
