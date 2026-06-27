@@ -35,6 +35,8 @@ export function isPendingPaymentExpired() {
   return false;
 }
 
+const MAXELPAY_PENDING_MINUTES = 30; /** auto-reject MaxelPay pending after 30 min — user has 30 min to complete payment */
+
 export function isApprovedLockExpired(deposit, now = new Date()) {
   if (deposit.status !== 'approved') return false;
   if (!deposit.expires_at) return false;
@@ -121,12 +123,21 @@ export async function processUserDepositsExpiry(userId, ip = '') {
   const deposits = await getDeposits({ user_id: userId }).catch(() => []);
   const now = new Date();
   let approvedCount = 0;
+  let rejectedCount = 0;
   for (const d of deposits) {
     if (d.status === 'approved' && isApprovedLockExpired(d, now)) {
       if (await expireApprovedDeposit(d, { ip, reason: 'user_refresh' })) approvedCount++;
     }
+    // Auto-reject MaxelPay pending deposits older than 30 min (webhook didn't arrive)
+    if (d.status === 'pending' && d.network === 'MaxelPay' && d.created_at) {
+      const ageMs = now.getTime() - new Date(d.created_at).getTime();
+      if (ageMs > MAXELPAY_PENDING_MINUTES * 60 * 1000) {
+        await updateDepositIfStatus(d.id, 'pending', { status: 'rejected' }).catch(() => {});
+        rejectedCount++;
+      }
+    }
   }
-  return { pendingCount: 0, approvedCount };
+  return { pendingCount: 0, approvedCount, rejectedCount };
 }
 
 export async function auditUserBalanceConsistency(userId) {
