@@ -110,28 +110,12 @@ async function syncDatabase() {
     }
   }
 
-  // Ensure deposits schema matches model definition (fixes "column not found in schema cache")
+  // Re-sync deposits table with model definition (fixes stale schema cache)
   try {
-    const qi = sequelize.getQueryInterface();
-    const tableInfo = await qi.describeTable('deposits');
-    const modelCols = Object.keys(Deposit.getAttributes());
-    const missing = modelCols.filter(c => !tableInfo[c]);
-    if (missing.length > 0) {
-      for (const col of missing) {
-        const attr = Deposit.getAttributes()[col];
-        await qi.addColumn('deposits', col, {
-          type: attr.type,
-          allowNull: attr.allowNull,
-          defaultValue: attr.defaultValue,
-        });
-        console.log(`[DB] Added missing column '${col}' to deposits table`);
-      }
-    }
-    // Reload schema cache by re-describing
-    await qi.describeTable('deposits');
-    console.log('[DB] Deposits schema cache refreshed');
+    await Deposit.sync({ force: true });
+    console.log('[DB] Deposits table recreated with latest schema');
   } catch (e) {
-    console.error('[DB] Error syncing deposits schema:', e.message);
+    console.error('[DB] Error recreating deposits table:', e.message);
   }
 
   // Verify the schema is correct after migration using raw SQLite
