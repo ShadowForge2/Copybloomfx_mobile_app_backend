@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Op, fn, col, literal } from 'sequelize';
 import { supabase, db } from './supabase.js';
 import nodemailer from 'nodemailer';
@@ -196,7 +197,21 @@ export async function getDeposits(where = {}, opts = {}) {
 
 export async function createDeposit(data) {
   if (USE_SQLITE) {
-    return sq(await DepositModel.create(data));
+    const id = crypto.randomUUID();
+    const { user_id, amount, network, wallet_address, status, reference, referrer_id, expires_at, approved_at } = data;
+    await sequelize.query(
+      `INSERT INTO deposits (id, user_id, amount, network, wallet_address, status, reference, referrer_id, expires_at, approved_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      {
+        replacements: [id, user_id, amount, network || null, wallet_address || null, status || 'pending', reference || null, referrer_id || null, expires_at || null, approved_at || null],
+        type: sequelize.QueryTypes.INSERT,
+      },
+    );
+    const [rows] = await sequelize.query(
+      `SELECT * FROM deposits WHERE id = ?`,
+      { replacements: [id], type: sequelize.QueryTypes.SELECT },
+    );
+    return rows;
   }
   const { data: result, error } = await supabase.from('deposits').insert(data).select().single();
   if (error) throw error;
