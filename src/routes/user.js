@@ -787,12 +787,12 @@ router.post('/maxelpay/initialize', async (req, res) => {
       metadata: { userId: req.user.id },
     });
 
-    if (!result.sessionId && !result.checkoutUrl && !result.url) {
+    if (!result.success || (!result.sessionId && !result.paymentUrl)) {
       return res.status(502).json({ error: 'MaxelPay session creation failed' });
     }
 
     const sessionId = result.sessionId || result.id;
-    const checkoutUrl = result.checkoutUrl || result.url || result.checkout_url;
+    const checkoutUrl = result.paymentUrl || result.checkoutUrl || result.url || result.checkout_url;
 
     const createdAt = new Date();
     const deposit = await createDeposit({

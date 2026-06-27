@@ -22,7 +22,12 @@ export async function createPaymentSession({ orderId, amount, currency, descript
       metadata,
     }),
   });
-  return res.json();
+  const json = await res.json();
+  // MaxelPay wraps response in { success, message, data: { sessionId, paymentUrl } }
+  if (json.data) {
+    return { ...json.data, success: json.success };
+  }
+  return json;
 }
 
 export function verifyWebhookSignature(payload, signature) {
