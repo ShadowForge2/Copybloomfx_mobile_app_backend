@@ -12,6 +12,16 @@ if (!fs.existsSync(dbDir)) {
 
 const dbPath = path.join(dbDir, 'bloomfx_dev.db');
 
+// Delete stale database on startup to ensure schema matches current models
+if (fs.existsSync(dbPath)) {
+  try {
+    fs.unlinkSync(dbPath);
+    console.log('[DB] Deleted stale database — fresh schema will be created');
+  } catch (e) {
+    console.error('[DB] Could not delete stale database:', e.message);
+  }
+}
+
 export const sequelize = new Sequelize({
   dialect: 'sqlite',
   storage: dbPath,
