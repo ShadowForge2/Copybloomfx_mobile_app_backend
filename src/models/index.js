@@ -110,6 +110,18 @@ async function syncDatabase() {
     }
   }
 
+  // Ensure reference column exists on deposits table (safe migration for SQLite)
+  try {
+    await sequelize.query('ALTER TABLE deposits ADD COLUMN "reference" TEXT');
+    console.log("[DB] Added column 'reference' to deposits table");
+  } catch (e) {
+    if (e.message && (e.message.includes('duplicate column name') || e.message.includes('already exists'))) {
+      console.log("[DB] Column 'reference' already exists in deposits table (verified)");
+    } else {
+      console.error("[DB] Error adding column 'reference' to deposits:", e.message);
+    }
+  }
+
   // Verify the schema is correct after migration using raw SQLite
   try {
     const result = await sequelize.query('PRAGMA table_info(profiles)', { type: sequelize.QueryTypes.SELECT });
