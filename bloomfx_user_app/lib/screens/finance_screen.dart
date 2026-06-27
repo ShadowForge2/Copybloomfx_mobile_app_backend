@@ -1327,7 +1327,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
         pollTimer = Timer.periodic(pollInterval, (_) async {
           final token = await AuthService.getToken();
           if (token == null) return;
-          final apiService = ApiService(baseUrl: 'https://copybloomfx-mobile-app-backend.onrender.com', authToken: token);
+          final apiService = ApiService(baseUrl: 'https://copybloomfx-mobile-app-backend-dmgy.onrender.com', authToken: token);
           final res = await apiService.getDepositStatus(dep.id);
           if (res.success && res.data != null) {
             final status = res.data!['status']?.toString() ?? 'pending';
