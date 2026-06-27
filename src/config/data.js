@@ -212,9 +212,22 @@ export async function createDeposit(data) {
     );
     return Array.isArray(fetched) ? fetched[0] : fetched;
   }
-  const { data: result, error } = await supabase.from('deposits').insert(data).select().single();
+  const id = crypto.randomUUID();
+  const { user_id, amount, network, wallet_address, status, reference, referrer_id, expires_at, approved_at } = data;
+  const { data: result, error } = await supabase.rpc('insert_deposit', {
+    p_id: id,
+    p_user_id: user_id,
+    p_amount: amount,
+    p_network: network || null,
+    p_wallet_address: wallet_address || null,
+    p_status: status || 'pending',
+    p_reference: reference || null,
+    p_referrer_id: referrer_id || null,
+    p_expires_at: expires_at || null,
+    p_approved_at: approved_at || null,
+  });
   if (error) {
-    console.error('[createDeposit] Supabase error:', JSON.stringify({ message: error.message, details: error.details, hint: error.hint, code: error.code }));
+    console.error('[createDeposit] RPC error:', JSON.stringify({ message: error.message, details: error.details, hint: error.hint, code: error.code }));
     throw error;
   }
   return result;
