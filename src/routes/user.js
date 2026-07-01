@@ -332,12 +332,12 @@ router.post('/withdrawals', async (req, res) => {
       return res.status(400).json({ error: 'One withdrawal per 24 hours' });
     }
 
+    const w = await createWithdrawal({ user_id: req.user.id, amount: amt, network, wallet_address: walletAddress || '' });
     await updateProfile(req.user.id, {
       withdrawable_balance: toNum(profile.withdrawable_balance) - amt,
       last_withdrawal_at: new Date(),
     });
     await updateUserRank(req.user.id);
-    const w = await createWithdrawal({ user_id: req.user.id, amount: amt, network, wallet_address: walletAddress || '' });
 
     createNotification(
       req.user.id,
