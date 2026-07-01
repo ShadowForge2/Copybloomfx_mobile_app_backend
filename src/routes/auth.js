@@ -80,10 +80,8 @@ router.post('/signup', async (req, res) => {
     });
 
     let refCode = generateReferralCode();
-    let existingRef = await getProfileByReferralCode(refCode).catch(() => null);
-    if (existingRef) {
+    while (await getProfileByReferralCode(refCode).catch(() => null)) {
       refCode = generateReferralCode();
-      existingRef = await getProfileByReferralCode(refCode).catch(() => null);
     }
 
     let referredBy = null;
@@ -146,7 +144,7 @@ router.post('/signup', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password, referrerCode } = req.body;
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password required' });
     }
@@ -226,19 +224,33 @@ router.post('/login', async (req, res) => {
     let profile = await getProfile(user.id);
     if (!profile) {
       let refCode = generateReferralCode();
-      let existingRef = await getProfileByReferralCode(refCode).catch(() => null);
-      if (existingRef) {
+      while (await getProfileByReferralCode(refCode).catch(() => null)) {
         refCode = generateReferralCode();
-        existingRef = await getProfileByReferralCode(refCode).catch(() => null);
       }
+
+      let loginReferredBy = null;
+      if (referrerCode) {
+        const refProfile = await getProfileByReferralCode(referrerCode.trim()).catch(() => null);
+        if (refProfile && refProfile.user_id !== user.id) loginReferredBy = refProfile.user_id;
+      }
+
       const loginRanks = await getAllRanks().then(r => r || []);
-      // Ensure we always have a valid rank_id (default to 1 if ranks table is empty)
       const loginDefaultRankId = loginRanks.length > 0 ? loginRanks[0].id : 1;
       profile = await createProfile({
         user_id: user.id,
         rank_id: loginDefaultRankId,
         referral_code: refCode,
+        referred_by: loginReferredBy,
       });
+
+      if (loginReferredBy) {
+        const referrerProfile = await getProfile(loginReferredBy).catch(() => null);
+        if (referrerProfile) {
+          await updateProfile(loginReferredBy, {
+            total_referrals: (referrerProfile.total_referrals || 0) + 1,
+          }).catch(() => {});
+        }
+      }
     }
     const rank = profile ? await getRank(profile.rank_id) : null;
     const token = signToken(user);

@@ -161,7 +161,7 @@ async function syncDatabase() {
   const adminCount = await User.count({ where: { role: 'admin' } });
   if (adminCount === 0) {
     await User.create({
-      id: 'admin',
+      id: '00000000-0000-0000-0000-000000000000',
       username: 'admin',
       email: process.env.ADMIN_EMAIL || 'bashirabdulganiyy9@gmail.com',
       role: 'admin',
