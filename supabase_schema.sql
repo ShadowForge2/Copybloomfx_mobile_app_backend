@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS deposits (
   wallet_address TEXT,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
   reference TEXT,
+  notes TEXT,
   referrer_id UUID,
   expires_at TIMESTAMPTZ,
   approved_at TIMESTAMPTZ,

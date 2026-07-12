@@ -2,7 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import {
   db, getUser, getUserBy, getProfile, updateProfile, getRank, getAllRanks,
-  getDeposit, getDeposits, createDeposit, updateDeposit, sumDeposits,
+  getDeposit, getDeposits, createDeposit, updateDeposit, updateDepositIfStatus, sumDeposits,
   getWithdrawals, createWithdrawal, sumWithdrawals,
   getCopyTrades, countCopyTrades, getTodayCopyTradesSum, createCopyTrade,
   processMatureCopyTrades,
@@ -587,7 +587,16 @@ router.post('/paystack/initialize', paymentInitLimiter, async (req, res) => {
     }
     const result = await paystackInit(email, amountUSD);
     if (!result.status) return res.status(502).json({ error: result.message || 'Paystack init failed' });
+
+    const tmpRef = `PS-${req.user.id}-${Date.now()}`;
+    const deposit = await createDeposit({
+      user_id: req.user.id, amount: amountUSD, network: 'Paystack',
+      wallet_address: 'Paystack', status: 'pending',
+      reference: tmpRef,
+    });
+
     res.status(201).json({
+      id: deposit.id,
       reference: result.data.reference,
       authorization_url: result.data.authorization_url,
       usd_amount: amountUSD,
@@ -602,10 +611,9 @@ router.post('/paystack/verify', paymentVerifyLimiter, async (req, res) => {
     const { reference } = req.body;
     if (!reference) return res.status(400).json({ error: 'Reference required' });
 
-    const [result, profile, existingDeposits] = await Promise.all([
+    const [result, profile] = await Promise.all([
       paystackVerify(reference),
       getProfile(req.user.id),
-      getDeposits({ user_id: req.user.id, network: 'Paystack', reference })
     ]);
 
     if (!result.status || result.data.status !== 'success') {
@@ -613,56 +621,103 @@ router.post('/paystack/verify', paymentVerifyLimiter, async (req, res) => {
     }
 
     const amountInNGN = result.data.amount / 100;
-    const amountInUSD = convertNGNtoUSD(amountInNGN);
-    if (amountInUSD < MIN_DEPOSIT) {
+    const amountPaid = convertNGNtoUSD(amountInNGN);
+    if (amountPaid < MIN_DEPOSIT) {
       return res.status(400).json({ error: 'Payment amount below minimum deposit' });
     }
 
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-    const alreadyCredited = existingDeposits.length > 0;
-    if (alreadyCredited) {
+    const deposits = await getDeposits({ user_id: req.user.id, network: 'Paystack', reference }).catch(() => []);
+    if (deposits.length > 0) {
       return res.json({ status: 'already_credited', reference, message: 'Payment already processed' });
     }
 
-    const wallet = assignWallet('USDT BEP20', null) || 'Paystack';
+    const pendingDeposits = await getDeposits({ user_id: req.user.id, network: 'Paystack' }).catch(() => []);
+    const pendingDeposit = pendingDeposits.find(d => d.status === 'pending' && d.reference?.startsWith('PS-'));
+    const requestedAmount = pendingDeposit ? toNum(pendingDeposit.amount) : amountPaid;
+
+    if (Math.abs(amountPaid - requestedAmount) > 0.01) {
+      if (pendingDeposit) {
+        await updateDepositIfStatus(pendingDeposit.id, 'pending', {
+          status: 'rejected',
+          reference,
+        }).catch(() => {});
+        releaseAssignment(pendingDeposit.id);
+      }
+      return res.status(400).json({ error: 'Amount mismatch — deposit rejected. Contact support.' });
+    }
+
+    const creditedAmount = requestedAmount;
+
     const paystackApprovedAt = new Date();
-    
-    const [paystackDeposit] = await Promise.all([
-      createDeposit({
-        user_id: req.user.id, amount: amountInUSD, network: 'Paystack',
+
+    if (pendingDeposit) {
+      const updated = await updateDepositIfStatus(pendingDeposit.id, 'pending', {
+        status: 'approved',
+        amount: creditedAmount,
+        approved_at: paystackApprovedAt,
+        expires_at: approvedLockExpiresAt(paystackApprovedAt),
+        reference,
+      });
+      if (!updated) {
+        return res.json({ status: 'already_credited', reference, message: 'Payment already processed' });
+      }
+      await updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + creditedAmount });
+
+      res.json({ status: 'success', reference, usd_amount: creditedAmount, message: `Payment verified and credited $${creditedAmount}` });
+
+      Promise.resolve().then(async () => {
+        await updateUserRank(req.user.id);
+        const referrerId = await resolveReferrerUserId(profile.referred_by);
+        if (referrerId && referrerId !== req.user.id) {
+          const commission = await payReferralCommission({
+            referrerId, refereeId: req.user.id,
+            depositId: pendingDeposit.id, depositAmount: creditedAmount,
+            walletNetwork: 'Paystack',
+          });
+          if (commission.paid) await updateUserRank(referrerId);
+        }
+        createNotification(req.user.id, 'Deposit Approved', `Your deposit of $${creditedAmount.toFixed(2)} has been approved and credited to your tradable balance. You can now start copy trading.`, 'success').catch(() => {});
+        createAuditLog({
+          user_id: req.user.id, action: 'payment.paystack',
+          description: `Paystack payment $${creditedAmount} verified and credited`,
+          metadata: JSON.stringify({ amount: creditedAmount, requested: requestedAmount, reference }),
+          ip_address: req.ip || req.connection.remoteAddress || '',
+        }).catch(() => {});
+      }).catch((err) => console.error('Background processing error in /paystack/verify:', err));
+    } else {
+      const wallet = assignWallet('USDT BEP20', null) || 'Paystack';
+      const paystackDeposit = await createDeposit({
+        user_id: req.user.id, amount: creditedAmount, network: 'Paystack',
         wallet_address: wallet, status: 'approved', approved_at: paystackApprovedAt,
         expires_at: approvedLockExpiresAt(paystackApprovedAt),
         reference,
-      }),
-      updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + amountInUSD })
-    ]);
+      });
+      await updateProfile(req.user.id, { locked_balance: toNum(profile.locked_balance) + creditedAmount });
 
-    res.json({ status: 'success', reference, usd_amount: amountInUSD, message: `Payment verified and credited $${amountInUSD}` });
+      res.json({ status: 'success', reference, usd_amount: creditedAmount, message: `Payment verified and credited $${creditedAmount}` });
 
-    Promise.resolve().then(async () => {
-      await updateUserRank(req.user.id);
-      const referrerId = await resolveReferrerUserId(profile.referred_by);
-      if (referrerId && referrerId !== req.user.id) {
-        const commission = await payReferralCommission({
-          referrerId,
-          refereeId: req.user.id,
-          depositId: paystackDeposit.id,
-          depositAmount: amountInUSD,
-          walletNetwork: 'Paystack',
-        });
-        if (commission.paid) await updateUserRank(referrerId);
-      }
-
-      createNotification(req.user.id, 'Deposit Approved', `Your deposit of $${amountInUSD.toFixed(2)} has been approved and credited to your tradable balance. You can now start copy trading.`, 'success').catch(() => {});
-
-      createAuditLog({
-        user_id: req.user.id, action: 'payment.paystack',
-        description: `Paystack payment $${amountInUSD} verified and credited`,
-        metadata: JSON.stringify({ amount: amountInUSD, reference }),
-        ip_address: req.ip || req.connection.remoteAddress || '',
-      }).catch(() => {});
-    }).catch((err) => console.error('Background processing error in /paystack/verify:', err));
+      Promise.resolve().then(async () => {
+        await updateUserRank(req.user.id);
+        const referrerId = await resolveReferrerUserId(profile.referred_by);
+        if (referrerId && referrerId !== req.user.id) {
+          const commission = await payReferralCommission({
+            referrerId, refereeId: req.user.id,
+            depositId: paystackDeposit.id, depositAmount: creditedAmount,
+            walletNetwork: 'Paystack',
+          });
+          if (commission.paid) await updateUserRank(referrerId);
+        }
+        createNotification(req.user.id, 'Deposit Approved', `Your deposit of $${creditedAmount.toFixed(2)} has been approved and credited to your tradable balance. You can now start copy trading.`, 'success').catch(() => {});
+        createAuditLog({
+          user_id: req.user.id, action: 'payment.paystack',
+          description: `Paystack payment $${creditedAmount} verified and credited`,
+          metadata: JSON.stringify({ amount: creditedAmount, requested: requestedAmount, reference }),
+          ip_address: req.ip || req.connection.remoteAddress || '',
+        }).catch(() => {});
+      }).catch((err) => console.error('Background processing error in /paystack/verify:', err));
+    }
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -872,19 +927,33 @@ router.post('/maxelpay/webhook', async (req, res) => {
     const deposit = deposits[0];
     if (deposit.status !== 'pending') return res.status(200).json({ received: true, status: 'already_processed' });
 
-    const paidAmount = data.totalPaidUsd || data.paidAmount || data.amount || toNum(deposit.amount);
+    const requestedAmount = toNum(deposit.amount);
+    const rawPaid = data.totalPaidUsd || data.paidAmount || data.amount || requestedAmount;
+    const paidAmount = toNum(rawPaid);
+
+    if (Math.abs(paidAmount - requestedAmount) > 0.01) {
+      await updateDepositIfStatus(deposit.id, 'pending', {
+        notes: `Amount mismatch: paid $${paidAmount.toFixed(2)}, requested $${requestedAmount.toFixed(2)}`,
+      }).catch(() => {});
+      createNotification(deposit.user_id, 'Deposit Pending Review', `Your MaxelPay deposit of $${requestedAmount.toFixed(2)} has a payment amount discrepancy ($${paidAmount.toFixed(2)} received). An admin will review shortly.`, 'warning').catch(() => {});
+      return res.status(200).json({ received: true, status: 'amount_mismatch' });
+    }
+
+    const creditedAmount = requestedAmount;
     const approvedAt = new Date();
 
-    await updateDeposit(deposit.id, {
+    const updated = await updateDepositIfStatus(deposit.id, 'pending', {
       status: 'approved',
+      amount: creditedAmount,
       approved_at: approvedAt,
       expires_at: approvedLockExpiresAt(approvedAt),
     });
+    if (!updated) return res.status(200).json({ received: true, status: 'already_processed' });
 
     const profile = await getProfile(deposit.user_id);
     if (profile) {
       await updateProfile(deposit.user_id, {
-        locked_balance: toNum(profile.locked_balance) + paidAmount,
+        locked_balance: toNum(profile.locked_balance) + creditedAmount,
       });
     }
 
@@ -896,13 +965,13 @@ router.post('/maxelpay/webhook', async (req, res) => {
         referrerId,
         refereeId: deposit.user_id,
         depositId: deposit.id,
-        depositAmount: paidAmount,
+        depositAmount: creditedAmount,
         walletNetwork: 'MaxelPay',
       });
       if (commission.paid) await updateUserRank(referrerId);
     }
 
-    createNotification(deposit.user_id, 'Deposit Approved', `Your MaxelPay deposit of $${paidAmount.toFixed(2)} has been confirmed and credited to your tradable balance.`, 'success').catch(() => {});
+    createNotification(deposit.user_id, 'Deposit Approved', `Your MaxelPay deposit of $${creditedAmount.toFixed(2)} has been confirmed and credited to your tradable balance.`, 'success').catch(() => {});
 
     res.status(200).json({ received: true, status: 'success' });
   } catch (e) {
@@ -916,18 +985,38 @@ router.get('/maxelpay/success', async (req, res) => {
   const { orderId } = req.query;
   if (orderId) {
     const deposits = await getDeposits({ reference: orderId, network: 'MaxelPay' }).catch(() => []);
-    if (deposits.length && deposits[0].status === 'pending') {
+    const pending = deposits.find(d => d.status === 'pending');
+    if (pending && !pending.notes) {
       const approvedAt = new Date();
-      await updateDeposit(deposits[0].id, {
+      const creditedAmount = toNum(pending.amount);
+      const updated = await updateDepositIfStatus(pending.id, 'pending', {
         status: 'approved',
+        amount: creditedAmount,
         approved_at: approvedAt,
         expires_at: approvedLockExpiresAt(approvedAt),
-      }).catch(() => {});
-      const profile = await getProfile(deposits[0].user_id).catch(() => null);
-      if (profile) {
-        await updateProfile(deposits[0].user_id, {
-          locked_balance: toNum(profile.locked_balance) + toNum(deposits[0].amount),
-        }).catch(() => {});
+      }).catch(() => null);
+
+      if (updated) {
+        const profile = await getProfile(pending.user_id).catch(() => null);
+        if (profile) {
+          await updateProfile(pending.user_id, {
+            locked_balance: toNum(profile.locked_balance) + creditedAmount,
+          }).catch(() => {});
+        }
+
+        await updateUserRank(pending.user_id).catch(() => {});
+
+        const referrerId = await resolveReferrerUserId(pending.user_id).catch(() => null);
+        if (referrerId && referrerId !== pending.user_id) {
+          const commission = await payReferralCommission({
+            referrerId, refereeId: pending.user_id,
+            depositId: pending.id, depositAmount: creditedAmount,
+            walletNetwork: 'MaxelPay',
+          }).catch(() => ({ paid: false }));
+          if (commission.paid) await updateUserRank(referrerId).catch(() => {});
+        }
+
+        createNotification(pending.user_id, 'Deposit Approved', `Your MaxelPay deposit of $${creditedAmount.toFixed(2)} has been confirmed and credited to your tradable balance.`, 'success').catch(() => {});
       }
     }
   }
@@ -955,12 +1044,11 @@ router.post('/paystack/callback', async (req, res) => {
     }
 
     const amountInNGN = result.data.amount / 100;
-    const amountInUSD = convertNGNtoUSD(amountInNGN);
-    if (amountInUSD < MIN_DEPOSIT) {
+    const amountPaid = convertNGNtoUSD(amountInNGN);
+    if (amountPaid < MIN_DEPOSIT) {
       return res.status(200).json({ status: 'below_minimum' });
     }
 
-    // Find user by email from paystack data
     const email = event.data?.customer?.email;
     if (!email) return res.status(200).json({ status: 'no_email' });
 
@@ -971,37 +1059,78 @@ router.post('/paystack/callback', async (req, res) => {
     if (!profile) return res.status(200).json({ status: 'no_profile' });
 
     const existingDeposits = await getDeposits({ user_id: user.id, network: 'Paystack', reference });
-    const alreadyCredited = existingDeposits.length > 0;
-    if (alreadyCredited) {
+    if (existingDeposits.length > 0) {
       return res.status(200).json({ status: 'already_credited' });
     }
 
-    const callbackApprovedAt = new Date();
-    const paystackDeposit = await createDeposit({
-      user_id: user.id, amount: amountInUSD, network: 'Paystack',
-      wallet_address: 'Paystack', status: 'approved', approved_at: callbackApprovedAt,
-      expires_at: approvedLockExpiresAt(callbackApprovedAt),
-      reference,
-    });
+    const pendingDeposits = await getDeposits({ user_id: user.id, network: 'Paystack' }).catch(() => []);
+    const pendingDeposit = pendingDeposits.find(d => d.status === 'pending' && d.reference?.startsWith('PS-'));
+    const requestedAmount = pendingDeposit ? toNum(pendingDeposit.amount) : amountPaid;
 
-    await updateProfile(user.id, { locked_balance: toNum(profile.locked_balance) + amountInUSD });
-    await updateUserRank(user.id);
-
-    const referrerId = await resolveReferrerUserId(profile.referred_by);
-    if (referrerId && referrerId !== user.id) {
-      const commission = await payReferralCommission({
-        referrerId,
-        refereeId: user.id,
-        depositId: paystackDeposit.id,
-        depositAmount: amountInUSD,
-        walletNetwork: 'Paystack',
-      });
-      if (commission.paid) await updateUserRank(referrerId);
+    if (Math.abs(amountPaid - requestedAmount) > 0.01) {
+      if (pendingDeposit) {
+        await updateDepositIfStatus(pendingDeposit.id, 'pending', {
+          status: 'rejected',
+          reference,
+        }).catch(() => {});
+        releaseAssignment(pendingDeposit.id);
+      }
+      return res.status(200).json({ status: 'amount_mismatch' });
     }
 
-    createNotification(user.id, 'Deposit Approved', `Your deposit of $${amountInUSD.toFixed(2)} has been approved and credited to your tradable balance. You can now start copy trading.`, 'success').catch(() => {});
+    const creditedAmount = requestedAmount;
 
-    res.status(200).json({ status: 'success', usd_amount: amountInUSD });
+    if (pendingDeposit) {
+      const updated = await updateDepositIfStatus(pendingDeposit.id, 'pending', {
+        status: 'approved',
+        amount: creditedAmount,
+        approved_at: new Date(),
+        expires_at: approvedLockExpiresAt(new Date()),
+        reference,
+      });
+      if (!updated) {
+        return res.status(200).json({ status: 'already_credited' });
+      }
+      await updateProfile(user.id, { locked_balance: toNum(profile.locked_balance) + creditedAmount });
+      await updateUserRank(user.id);
+
+      const referrerId = await resolveReferrerUserId(profile.referred_by);
+      if (referrerId && referrerId !== user.id) {
+        const commission = await payReferralCommission({
+          referrerId, refereeId: user.id,
+          depositId: pendingDeposit.id, depositAmount: creditedAmount,
+          walletNetwork: 'Paystack',
+        });
+        if (commission.paid) await updateUserRank(referrerId);
+      }
+
+      createNotification(user.id, 'Deposit Approved', `Your deposit of $${creditedAmount.toFixed(2)} has been approved and credited to your tradable balance. You can now start copy trading.`, 'success').catch(() => {});
+      res.status(200).json({ status: 'success', usd_amount: creditedAmount });
+    } else {
+      const callbackApprovedAt = new Date();
+      const paystackDeposit = await createDeposit({
+        user_id: user.id, amount: creditedAmount, network: 'Paystack',
+        wallet_address: 'Paystack', status: 'approved', approved_at: callbackApprovedAt,
+        expires_at: approvedLockExpiresAt(callbackApprovedAt),
+        reference,
+      });
+
+      await updateProfile(user.id, { locked_balance: toNum(profile.locked_balance) + creditedAmount });
+      await updateUserRank(user.id);
+
+      const referrerId = await resolveReferrerUserId(profile.referred_by);
+      if (referrerId && referrerId !== user.id) {
+        const commission = await payReferralCommission({
+          referrerId, refereeId: user.id,
+          depositId: paystackDeposit.id, depositAmount: creditedAmount,
+          walletNetwork: 'Paystack',
+        });
+        if (commission.paid) await updateUserRank(referrerId);
+      }
+
+      createNotification(user.id, 'Deposit Approved', `Your deposit of $${creditedAmount.toFixed(2)} has been approved and credited to your tradable balance. You can now start copy trading.`, 'success').catch(() => {});
+      res.status(200).json({ status: 'success', usd_amount: creditedAmount });
+    }
   } catch (e) {
     res.status(200).json({ status: 'error', message: e.message });
   }

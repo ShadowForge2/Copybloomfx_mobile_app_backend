@@ -9,6 +9,7 @@ const Deposit = sequelize.define('Deposit', {
   wallet_address: { type: DataTypes.TEXT },
   status: { type: DataTypes.TEXT, defaultValue: 'pending' },
   reference: { type: DataTypes.TEXT },
+  notes: { type: DataTypes.TEXT },
   referrer_id: { type: DataTypes.UUID },
   expires_at: { type: DataTypes.DATE },
   approved_at: { type: DataTypes.DATE },

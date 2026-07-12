@@ -127,6 +127,7 @@ router.get('/deposits', async (req, res) => {
       return {
         id: d.id, userId: d.user_id, amount: toNum(d.amount),
         network: d.network, walletAddress: d.wallet_address, status: d.status,
+        notes: d.notes || null,
         createdAt: d.created_at, expiresAt: d.expires_at, referrerId: d.referrer_id,
         user: user ? { id: user.id, username: user.username, email: user.email, isFlagged: user.is_flagged, isBanned: user.is_banned } : null,
       };
@@ -152,11 +153,12 @@ router.post('/deposits/:id/approve', async (req, res) => {
     const profile = await getProfile(d.user_id);
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-    const amt = toNum(d.amount);
+    const amt = req.body.amount != null ? toNum(req.body.amount) : toNum(d.amount);
+    if (isNaN(amt) || amt <= 0) return res.status(400).json({ error: 'Invalid amount' });
     await updateProfile(d.user_id, { locked_balance: toNum(profile.locked_balance) + amt });
     const approvedAt = new Date();
     const expiresAt = approvedLockExpiresAt(approvedAt);
-    await updateDeposit(d.id, { status: 'approved', approved_at: approvedAt, expires_at: expiresAt });
+    await updateDeposit(d.id, { status: 'approved', amount: amt, approved_at: approvedAt, expires_at: expiresAt, notes: null });
     releaseAssignment(d.id);
 
     if (d.referrer_id && d.referrer_id !== d.user_id) {
@@ -171,13 +173,13 @@ router.post('/deposits/:id/approve', async (req, res) => {
     await updateUserRank(d.user_id);
     if (d.referrer_id) await updateUserRank(d.referrer_id);
 
-    createNotification(d.user_id, 'Deposit Approved', `Your deposit of $${toNum(d.amount).toFixed(2)} has been approved and credited to your tradable balance. You can now start copy trading.`, 'success').catch(() => {});
+    createNotification(d.user_id, 'Deposit Approved', `Your deposit of $${amt.toFixed(2)} has been approved and credited to your tradable balance. You can now start copy trading.`, 'success').catch(() => {});
 
     createAuditLog({
       user_id: req.user.id, target_user_id: d.user_id, action: 'deposit.approve',
       entity_type: 'deposit', entity_id: d.id,
       description: `Admin approved $${amt} deposit for user`,
-      metadata: JSON.stringify({ amount: amt, userId: d.user_id }),
+      metadata: JSON.stringify({ amount: amt, originalAmount: toNum(d.amount), userId: d.user_id }),
       ip_address: req.ip || req.connection.remoteAddress || '',
     }).catch(() => {});
 
@@ -192,7 +194,7 @@ router.post('/deposits/:id/reject', async (req, res) => {
     const d = await getDeposit(req.params.id);
     if (!d) return res.status(404).json({ error: 'Deposit not found' });
     if (d.status !== 'pending') return res.status(400).json({ error: 'Deposit not pending' });
-    await updateDeposit(d.id, { status: 'rejected' });
+    await updateDeposit(d.id, { status: 'rejected', notes: null });
     releaseAssignment(d.id);
 
     createNotification(
