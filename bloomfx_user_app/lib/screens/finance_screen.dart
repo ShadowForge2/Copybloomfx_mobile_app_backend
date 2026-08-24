@@ -84,8 +84,8 @@ class _FinanceScreenState extends State<FinanceScreen> {
                         _buildFinancialOverview(dashboardProvider, c),
                         const SizedBox(height: 8),
                         Text(
-                          'Deposits stay pending until an admin approves; then funds credit to tradable balance. '
-                          'Withdrawals debit withdrawable immediately and stay pending until payout is approved.',
+                          'Deposits are verified and credited to your tradable balance automatically. '
+                          'Withdrawals are debited instantly and paid out shortly after verification.',
                           style: TextStyle(color: c.textSecondary, fontSize: 11),
                         ),
                         const SizedBox(height: 24),
@@ -513,7 +513,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
             _buildDepositOption(
               icon: Icons.currency_bitcoin,
               title: 'Crypto',
-              subtitle: 'USDT BEP-20, ERC-20, Solana, etc. — admin approval required',
+              subtitle: 'BTC, USDT BEP-20/ERC-20, Solana & more — credited automatically once payment is verified',
               color: Colors.orange,
               onTap: () {
                 Navigator.pop(context);
@@ -525,7 +525,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
             _buildDepositOption(
               icon: Icons.account_balance,
               title: 'Local (Paystack)',
-              subtitle: 'Pay with card, bank transfer, USSD — auto-verified, no admin needed',
+              subtitle: 'Pay with card, bank transfer or USSD — verified and credited instantly',
               color: Colors.green,
               onTap: () {
                 Navigator.pop(context);
@@ -642,7 +642,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Minimum \$${data?.minDeposit.toStringAsFixed(2) ?? '7.00'}. Pending admin approval required.',
+                'Minimum \$${data?.minDeposit.toStringAsFixed(2) ?? '7.00'}. Credited automatically once payment is verified.',
                 style: TextStyle(color: c.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 20),
@@ -791,7 +791,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Pay with Paystack — card, bank transfer, USSD. Auto-verified, no admin needed.',
+                    'Pay with Paystack — card, bank transfer or USSD. Verified and credited instantly.',
                     style: TextStyle(color: c.textSecondary, fontSize: 12),
                   ),
                   const SizedBox(height: 20),
@@ -1035,7 +1035,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
             _buildDepositOption(
               icon: Icons.currency_bitcoin,
               title: 'Crypto (USDT BEP-20)',
-              subtitle: 'Withdraw to USDT BEP-20 address — admin processes payout',
+              subtitle: 'Payout to your USDT BEP-20 address shortly after verification',
               color: Colors.orange,
               onTap: () {
                 Navigator.pop(context);
@@ -1105,7 +1105,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
               Text(
                 'Minimum withdrawal \$${data?.minWithdrawal.toStringAsFixed(2) ?? '1.50'}, '
                 'use USDT(BEP-20) only for withdrawal. '
-                'Withdrawals are processed after admin careful review.',
+                'Payouts are processed promptly after verification.',
                 style: TextStyle(color: c.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 20),
@@ -1168,7 +1168,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                           if (w != null) {
                             context.read<NotificationProvider>().fetchNotifications();
                             Fluttertoast.showToast(
-                              msg: 'Withdrawal pending. Admin will process payout to your USDT BEP-20 address.',
+                              msg: 'Withdrawal submitted. Payout to your USDT BEP-20 address is on the way.',
                               backgroundColor: Colors.green,
                               textColor: Colors.white,
                             );
@@ -1399,7 +1399,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                                   const SizedBox(width: 8),
                                   Text(
                                     isExpired
-                                        ? 'Wallet slot expired — create a new deposit for a fresh address (your request stays pending until admin reviews)'
+                                        ? 'Address window ended — start a new deposit to get a fresh address. Your request stays safely queued for verification.'
                                         : 'Wallet address reserved for ${minutes}m ${secs}s',
                                     style: TextStyle(
                                       color: isExpired ? Colors.red : Colors.white70,
@@ -1424,7 +1424,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                                 Icon(Icons.info, color: Colors.red, size: 18),
                                 SizedBox(width: 8),
                                 Text(
-                                  'This deposit was rejected by admin.',
+                                  'This deposit could not be verified. Contact support if you already sent payment.',
                                   style: TextStyle(color: Colors.red, fontSize: 12),
                                 ),
                               ],

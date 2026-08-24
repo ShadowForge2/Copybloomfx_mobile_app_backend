@@ -206,7 +206,7 @@ class PendingDeposit {
   }
 
   String? getTimeRemaining() {
-    if (expiresAt == null) return 'Awaiting admin review';
+    if (expiresAt == null) return 'Verifying payment…';
 
     final now = DateTime.now();
     if (expiresAt!.isBefore(now)) return 'Lock period ended';

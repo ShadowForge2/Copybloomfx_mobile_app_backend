@@ -146,7 +146,7 @@ class NotificationService {
     await _plugin.show(
       DateTime.now().millisecondsSinceEpoch % 100000,
       'Deposit Pending',
-      'Your \$${amount.toStringAsFixed(2)} deposit is awaiting admin approval.',
+      'Your \$${amount.toStringAsFixed(2)} deposit is being verified. You will be notified once it is credited.',
       details,
     );
   }

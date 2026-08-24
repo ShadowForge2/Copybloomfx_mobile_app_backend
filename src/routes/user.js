@@ -344,7 +344,7 @@ router.post('/deposits', async (req, res) => {
     });
     bindAssignment(d.id, wallet);
 
-    createNotification(req.user.id, 'Deposit Pending', `Your deposit of $${amt.toFixed(2)} is currently being reviewed and will be credited to your tradable balance once approved.`, 'info').catch(() => {});
+    createNotification(req.user.id, 'Deposit Pending', `Your deposit of $${amt.toFixed(2)} is being verified and will be credited to your tradable balance once confirmed.`, 'info').catch(() => {});
 
     createAuditLog({
       user_id: req.user.id, action: 'deposit.create', entity_type: 'deposit', entity_id: d.id,

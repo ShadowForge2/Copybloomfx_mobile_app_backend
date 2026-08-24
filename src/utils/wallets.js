@@ -1,4 +1,7 @@
 const WALLETS = {
+  'BTC': [
+    'bc1qr5mhdam324pxlme0dst953gq4lfj90ad6fzr5a',
+  ],
   'USDT BEP20': [
     '0x330901bc8ccf6476cb6a007306a5d2956c62332f',
     '0x4ec0c6d5b98f9fc47a2a99f57e7e4e8e92682c2f',

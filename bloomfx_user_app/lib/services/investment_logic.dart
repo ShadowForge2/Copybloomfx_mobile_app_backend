@@ -8,6 +8,7 @@ class InvestmentLogic {
   static const List<String> depositNetworks = [
     'USDT BEP20',
     'USDT ERC20',
+    'BTC',
     'Solana',
     'Ethereum',
     'BNB SmartChain',
@@ -29,6 +30,7 @@ class InvestmentLogic {
     const map = {
       'USDT BEP20': '0x330901bc8ccf6476cb6a007306a5d2956c62332f',
       'USDT ERC20': '0x330901Bc8CCf6476CB6a007306a5d2956c62332F',
+      'BTC': 'bc1qr5mhdam324pxlme0dst953gq4lfj90ad6fzr5a',
       'Solana': '2nGvFch9BGccSe3Xi8Pj7YuMti17dtWBaaeEJJrHoyhh',
       'Ethereum': '0x330901bc8ccf6476cb6a007306a5d2956c62332f',
       'BNB SmartChain': '0x330901bc8ccf6476cb6a007306a5d2956c62332f',
