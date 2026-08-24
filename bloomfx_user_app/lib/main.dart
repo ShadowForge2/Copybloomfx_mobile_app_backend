@@ -44,7 +44,7 @@ void main() async {
   );
 }
 
-const String apiBaseUrl = 'https://copybloomfx-mobile-app-backend-dmgy.onrender.com';
+const String apiBaseUrl = 'https://copybloomfx-mobile-app-backend-nb7f.onrender.com';
 const String supabaseUrl = 'https://mefbzfgwogvmsgttlffp.supabase.co';
 const String supabaseAnonKey =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1lZmJ6Zmd3b2d2bXNndHRsZmZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MTU4NTksImV4cCI6MjA5NDI5MTg1OX0.az5I7mJLSxASIvmqRquvXqLF2fBZC9sCm2SOmkQCCwI';

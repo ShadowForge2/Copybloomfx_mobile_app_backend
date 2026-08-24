@@ -58,7 +58,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   Future<void> _pingServer() async {
     setState(() => _isPinging = true);
     try {
-      final url = 'https://copybloomfx-mobile-app-backend-dmgy.onrender.com/api/health';
+      final url = 'https://copybloomfx-mobile-app-backend-nb7f.onrender.com/api/health';
       final start = DateTime.now();
       final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
       final ms = DateTime.now().difference(start).inMilliseconds;

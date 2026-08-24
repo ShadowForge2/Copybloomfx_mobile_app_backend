@@ -97,7 +97,7 @@ async function runDepositExpiryJobs() {
       console.log(`[CRON] Expired ${approvedCount} approved deposit(s) after ${LOCK_DAYS}-day lock`);
     }
   } catch (e) {
-    console.error('[CRON] Deposit expiry error:', e.message);
+    console.error('[CRON] Deposit expiry error:', e.message, e.cause ? `| cause: ${e.cause}` : '');
   }
 }
 
@@ -108,7 +108,7 @@ async function runCopyTradeCloseJobs() {
       console.log(`[CRON] Closed ${closedCount} matured copy trade(s)`);
     }
   } catch (e) {
-    console.error('[CRON] Copy trade auto-close error:', e.message);
+    console.error('[CRON] Copy trade auto-close error:', e.message, e.cause ? `| cause: ${e.cause}` : '');
   }
 }
 

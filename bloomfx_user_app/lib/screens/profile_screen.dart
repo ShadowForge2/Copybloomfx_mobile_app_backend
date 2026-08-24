@@ -515,7 +515,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final token = await AuthService.getToken();
       if (token == null) return;
-      final api = ApiService(baseUrl: 'https://copybloomfx-mobile-app-backend-dmgy.onrender.com', authToken: token);
+      final api = ApiService(baseUrl: 'https://copybloomfx-mobile-app-backend-nb7f.onrender.com', authToken: token);
       final res = await api.updateProfile({'email': email});
       if (res.success) {
         Fluttertoast.showToast(msg: 'Profile updated successfully!', backgroundColor: Colors.green, textColor: Colors.white);
