@@ -566,7 +566,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Color _notificationColor(NotificationType type) {
     switch (type) {
       case NotificationType.info:
-        return const Color(0xFF58A6FF);
+        return const Color(0xFFD4AF37);
       case NotificationType.warning:
         return const Color(0xFFFFA726);
       case NotificationType.success:

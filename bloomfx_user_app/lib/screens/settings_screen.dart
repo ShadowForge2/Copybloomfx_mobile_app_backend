@@ -363,7 +363,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () => Navigator.pop(ctx),
             child: const Text(
               'Close',
-              style: TextStyle(color: Color(0xFF58A6FF)),
+              style: TextStyle(color: Color(0xFFD4AF37)),
             ),
           ),
         ],
@@ -436,7 +436,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () => Navigator.pop(ctx),
             child: const Text(
               'Close',
-              style: TextStyle(color: Color(0xFF58A6FF)),
+              style: TextStyle(color: Color(0xFFD4AF37)),
             ),
           ),
         ],
@@ -659,7 +659,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
             child: const Text(
               'Open Telegram',
-              style: TextStyle(color: Color(0xFF58A6FF)),
+              style: TextStyle(color: Color(0xFFD4AF37)),
             ),
           ),
         ],
@@ -695,7 +695,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text('## 1. Introduction'),
                 SizedBox(height: 4),
                 Text(
-                  'CP Bloom FX ("Company", "we", "our", or "us") respects your privacy and is committed to protecting your personal information.',
+                  'CPBloomFX ("Company", "we", "our", or "us") respects your privacy and is committed to protecting your personal information.',
                 ),
                 SizedBox(height: 4),
                 Text(
@@ -929,7 +929,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () => Navigator.pop(c),
             child: const Text(
               'Close',
-              style: TextStyle(color: Color(0xFF58A6FF)),
+              style: TextStyle(color: Color(0xFFD4AF37)),
             ),
           ),
         ],
@@ -965,7 +965,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text('## 1. Acceptance of Terms'),
                 SizedBox(height: 4),
                 Text(
-                  'By accessing or using the CP Bloom FX platform, mobile application, website, or related services ("Platform"), you agree to comply with and be legally bound by these Terms of Service ("Terms"). If you do not agree to these Terms, you must not use the Platform.',
+                  'By accessing or using the CPBloomFX platform, mobile application, website, or related services ("Platform"), you agree to comply with and be legally bound by these Terms of Service ("Terms"). If you do not agree to these Terms, you must not use the Platform.',
                 ),
                 SizedBox(height: 12),
                 Text('## 2. Eligibility'),
@@ -985,7 +985,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text('## 3. Nature of Service'),
                 SizedBox(height: 4),
                 Text(
-                  'CP Bloom FX provides a copy trading and automated trading technology platform that allows users to follow or copy trading strategies and activities from selected traders or automated systems.',
+                  'CPBloomFX provides a copy trading and automated trading technology platform that allows users to follow or copy trading strategies and activities from selected traders or automated systems.',
                 ),
                 SizedBox(height: 4),
                 Text(
@@ -1108,13 +1108,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text('## 11. Intellectual Property'),
                 SizedBox(height: 4),
                 Text(
-                  'All Platform content, branding, software, graphics, trademarks, and systems are the exclusive property of CP Bloom FX and may not be copied, reproduced, or redistributed without written permission.',
+                  'All Platform content, branding, software, graphics, trademarks, and systems are the exclusive property of CPBloomFX and may not be copied, reproduced, or redistributed without written permission.',
                 ),
                 SizedBox(height: 12),
                 Text('## 12. Limitation of Liability'),
                 SizedBox(height: 4),
                 Text(
-                  'To the maximum extent permitted by law, CP Bloom FX and its operators shall not be liable for:',
+                  'To the maximum extent permitted by law, CPBloomFX and its operators shall not be liable for:',
                 ),
                 Text('• trading losses;'),
                 Text('• indirect damages;'),
@@ -1186,7 +1186,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onPressed: () => Navigator.pop(c),
             child: const Text(
               'Close',
-              style: TextStyle(color: Color(0xFF58A6FF)),
+              style: TextStyle(color: Color(0xFFD4AF37)),
             ),
           ),
         ],

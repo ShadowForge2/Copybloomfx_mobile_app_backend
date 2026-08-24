@@ -38,28 +38,28 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final router = GoRouter(
-      initialLocation: '/admin/login',
+      initialLocation: '/login',
       refreshListenable: adminAuthProvider,
       routes: [
         GoRoute(
-          path: '/admin/login',
+          path: '/login',
           builder: (context, state) => const AdminLoginScreen(),
         ),
         GoRoute(
-          path: '/admin/dashboard',
+          path: '/dashboard',
           builder: (context, state) => const AdminDashboardScreen(),
         ),
       ],
       redirect: (context, state) {
         final auth = Provider.of<AdminAuthProvider>(context, listen: false);
         final loggedIn = auth.isAuthenticated;
-        final onLogin = state.matchedLocation == '/admin/login';
+        final onLogin = state.matchedLocation == '/login';
 
         if (!loggedIn && !onLogin) {
-          return '/admin/login';
+          return '/login';
         }
         if (loggedIn && onLogin) {
-          return '/admin/dashboard';
+          return '/dashboard';
         }
         return null;
       },
@@ -93,15 +93,15 @@ class MyApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp.router(
-        title: 'BloomFX Admin App',
+        title: 'CPBloomFX Admin',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF1E3A8A),
+            seedColor: const Color(0xFFD4AF37),
             brightness: Brightness.dark,
           ),
           useMaterial3: true,
-          scaffoldBackgroundColor: const Color(0xFF0D1117),
+          scaffoldBackgroundColor: const Color(0xFF0A0D13),
           navigationBarTheme: NavigationBarThemeData(
             labelTextStyle: WidgetStateProperty.resolveWith(
               (_) => const TextStyle(color: Colors.white, fontSize: 11),

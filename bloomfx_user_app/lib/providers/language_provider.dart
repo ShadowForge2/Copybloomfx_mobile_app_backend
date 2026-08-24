@@ -57,7 +57,7 @@ class LanguageProvider extends ChangeNotifier {
 
 const _allTranslations = <String, Map<String, String>>{
   'en': {
-    'app.title': 'BloomFX',
+    'app.title': 'CPBloomFX',
     'nav.dashboard': 'Dashboard',
     'nav.news': 'Market News',
     'nav.finance': 'Finance',
@@ -192,7 +192,7 @@ const _allTranslations = <String, Map<String, String>>{
     'ok': 'OK',
   },
   'pt': {
-    'app.title': 'BloomFX',
+    'app.title': 'CPBloomFX',
     'nav.dashboard': 'Painel',
     'nav.news': 'Notícias',
     'nav.finance': 'Finanças',
@@ -327,7 +327,7 @@ const _allTranslations = <String, Map<String, String>>{
     'ok': 'OK',
   },
   'zh': {
-    'app.title': 'BloomFX',
+    'app.title': 'CPBloomFX',
     'nav.dashboard': '仪表盘',
     'nav.news': '市场新闻',
     'nav.finance': '财务',
@@ -462,7 +462,7 @@ const _allTranslations = <String, Map<String, String>>{
     'ok': '确定',
   },
   'ja': {
-    'app.title': 'BloomFX',
+    'app.title': 'CPBloomFX',
     'nav.dashboard': 'ダッシュボード',
     'nav.news': 'マーケットニュース',
     'nav.finance': '財務',
@@ -597,7 +597,7 @@ const _allTranslations = <String, Map<String, String>>{
     'ok': 'OK',
   },
   'hi': {
-    'app.title': 'BloomFX',
+    'app.title': 'CPBloomFX',
     'nav.dashboard': 'डैशबोर्ड',
     'nav.news': 'बाज़ार समाचार',
     'nav.finance': 'वित्त',

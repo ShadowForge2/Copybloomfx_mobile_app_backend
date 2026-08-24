@@ -49,7 +49,7 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF050816),
+      backgroundColor: const Color(0xFF06080D),
       body: Stack(
         children: [
           // Background gradient glow
@@ -61,8 +61,8 @@ class _SplashScreenState extends State<SplashScreen>
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
                   colors: [
-                    Colors.blue.withValues(alpha: 0.12),
-                    Colors.blue.withValues(alpha: 0.04),
+                    const Color(0xFFD4AF37).withValues(alpha: 0.10),
+                    const Color(0xFF9C7A28).withValues(alpha: 0.04),
                     Colors.transparent,
                   ],
                 ),
@@ -86,7 +86,7 @@ class _SplashScreenState extends State<SplashScreen>
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.blue.withValues(alpha: 0.25),
+                        color: const Color(0xFFD4AF37).withValues(alpha: 0.22),
                         blurRadius: 60,
                         spreadRadius: 20,
                       ),
@@ -123,11 +123,11 @@ class _SplashScreenState extends State<SplashScreen>
                             style: TextStyle(
                               fontSize: 40,
                               fontWeight: FontWeight.bold,
-                              color: Colors.white,
+                              color: Color(0xFFE8CE8C),
                               letterSpacing: 4,
                               shadows: [
                                 Shadow(
-                                  color: Colors.blue,
+                                  color: Color(0xFFD4AF37),
                                   blurRadius: 30,
                                 ),
                                 Shadow(
@@ -157,7 +157,7 @@ class _SplashScreenState extends State<SplashScreen>
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: Colors.blue.withValues(alpha: 0.15),
+                      color: const Color(0xFFD4AF37).withValues(alpha: 0.15),
                       width: 1,
                     ),
                   ),
@@ -174,15 +174,15 @@ class _SplashScreenState extends State<SplashScreen>
                 const SizedBox(height: 10),
 
                 Text(
-                  'CP Bloom FX',
-                  style: GoogleFonts.orbitron(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 3,
+                  'CPBloomFX',
+                  style: GoogleFonts.playfairDisplay(
+                    color: const Color(0xFFE8CE8C),
+                    fontSize: 32,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 2,
                     shadows: [
                       Shadow(
-                        color: Colors.blue.withValues(alpha: 0.5),
+                        color: const Color(0xFFD4AF37).withValues(alpha: 0.45),
                         blurRadius: 20,
                       ),
                     ],
@@ -197,10 +197,11 @@ class _SplashScreenState extends State<SplashScreen>
                 Text(
                   'AI COPY TRADING SYSTEM',
                   style: GoogleFonts.poppins(
-                    color: Colors.blueGrey.shade200,
-                    fontSize: 13,
-                    letterSpacing: 2,
+                    color: const Color(0xFF98A0B3),
+                    fontSize: 12,
+                    letterSpacing: 4,
                   ),
+                ),
                 )
                     .animate(delay: 1400.ms)
                     .fadeIn(duration: 1200.ms),
@@ -222,9 +223,9 @@ class _SplashScreenState extends State<SplashScreen>
                   gradient: const LinearGradient(
                     colors: [
                       Colors.transparent,
-                      Colors.blue,
-                      Colors.white,
-                      Colors.blue,
+                      Color(0xFFD4AF37),
+                      Color(0xFFE8CE8C),
+                      Color(0xFFD4AF37),
                       Colors.transparent,
                     ],
                   ),
@@ -256,11 +257,11 @@ class _RingPainter extends CustomPainter {
       ..strokeWidth = 2
       ..shader = LinearGradient(
         colors: [
-          Colors.blue.withValues(alpha: 0.1),
-          Colors.blue,
-          Colors.cyan,
-          Colors.blue,
-          Colors.blue.withValues(alpha: 0.1),
+          const Color(0xFFD4AF37).withValues(alpha: 0.1),
+          const Color(0xFFD4AF37),
+          const Color(0xFFE8CE8C),
+          const Color(0xFFD4AF37),
+          const Color(0xFFD4AF37).withValues(alpha: 0.1),
         ],
       ).createShader(Rect.fromCircle(center: center, radius: radius));
 
@@ -278,10 +279,10 @@ class _RingPainter extends CustomPainter {
       ..strokeWidth = 1.5
       ..shader = LinearGradient(
         colors: [
-          Colors.cyan.withValues(alpha: 0.05),
-          Colors.cyan,
-          Colors.blue,
-          Colors.cyan.withValues(alpha: 0.05),
+          const Color(0xFF9C7A28).withValues(alpha: 0.05),
+          const Color(0xFF9C7A28),
+          const Color(0xFFD4AF37),
+          const Color(0xFF9C7A28).withValues(alpha: 0.05),
         ],
       ).createShader(Rect.fromCircle(center: center, radius: radius - 10));
 

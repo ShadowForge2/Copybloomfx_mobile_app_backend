@@ -43,13 +43,13 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       final success = await auth.login(username, password);
       if (success && mounted) {
         Fluttertoast.showToast(msg: 'Welcome Admin', toastLength: Toast.LENGTH_SHORT, gravity: ToastGravity.BOTTOM, backgroundColor: Colors.green, textColor: Colors.white);
-        context.go('/admin/dashboard');
+        context.go('/dashboard');
       } else if (mounted) {
         final msg = auth.errorMessage ?? 'Login failed';
         Fluttertoast.showToast(msg: msg, toastLength: Toast.LENGTH_LONG, gravity: ToastGravity.BOTTOM, backgroundColor: Colors.red, textColor: Colors.white);
       }
     } catch (e) {
-      if (mounted) Fluttertoast.showToast(msg: 'Login error: $e', toastLength: Toast.LENGTH_LONG, gravity: ToastGravity.BOTTOM, backgroundColor: Colors.red, textColor: Colors.white);
+      if (mounted) Fluttertoast.showToast(msg: 'Something went wrong. Please try again.', toastLength: Toast.LENGTH_LONG, gravity: ToastGravity.BOTTOM, backgroundColor: Colors.red, textColor: Colors.white);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -80,16 +80,16 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
     } on http.ClientException catch (e) {
       final msg = e.message.toLowerCase();
       if (msg.contains('dns') || msg.contains('resolve')) {
-        Fluttertoast.showToast(msg: 'DNS lookup failed — check your internet', backgroundColor: Colors.red, textColor: Colors.white, toastLength: Toast.LENGTH_LONG);
+        Fluttertoast.showToast(msg: 'No internet connection. Please check your network.', backgroundColor: Colors.red, textColor: Colors.white, toastLength: Toast.LENGTH_LONG);
       } else if (msg.contains('timed out') || msg.contains('timeout')) {
-        Fluttertoast.showToast(msg: 'Connection timed out (15s) — server took too long', backgroundColor: Colors.red, textColor: Colors.white, toastLength: Toast.LENGTH_LONG);
+        Fluttertoast.showToast(msg: 'Connection timed out — the server may be waking up. Please try again.', backgroundColor: Colors.red, textColor: Colors.white, toastLength: Toast.LENGTH_LONG);
       } else if (msg.contains('connection refused')) {
-        Fluttertoast.showToast(msg: 'Connection refused — server may be down', backgroundColor: Colors.red, textColor: Colors.white, toastLength: Toast.LENGTH_LONG);
+        Fluttertoast.showToast(msg: 'The server is not responding right now. Please try again later.', backgroundColor: Colors.red, textColor: Colors.white, toastLength: Toast.LENGTH_LONG);
       } else {
-        Fluttertoast.showToast(msg: 'Network error: ${e.message.substring(0, e.message.length.clamp(0, 80))}', backgroundColor: Colors.red, textColor: Colors.white, toastLength: Toast.LENGTH_LONG);
+        Fluttertoast.showToast(msg: 'Network problem. Please check your connection and try again.', backgroundColor: Colors.red, textColor: Colors.white, toastLength: Toast.LENGTH_LONG);
       }
     } catch (e) {
-      Fluttertoast.showToast(msg: 'Error: $e', backgroundColor: Colors.red, textColor: Colors.white, toastLength: Toast.LENGTH_LONG);
+      Fluttertoast.showToast(msg: 'Something went wrong. Please try again.', backgroundColor: Colors.red, textColor: Colors.white, toastLength: Toast.LENGTH_LONG);
     } finally {
       if (mounted) setState(() => _isPinging = false);
     }
@@ -110,11 +110,11 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(color: const Color(0xFF1E3A8A), borderRadius: BorderRadius.circular(20)),
-                    child: const Icon(Icons.admin_panel_settings, size: 60, color: Colors.white),
+                    decoration: BoxDecoration(color: const Color(0xFFD4AF37), borderRadius: BorderRadius.circular(20)),
+                    child: const Icon(Icons.admin_panel_settings, size: 60, color: Color(0xFF171204)),
                   ),
                   const SizedBox(height: 24),
-                  const Text('BloomFX Admin', style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
+                  const Text('CPBloomFX Admin', style: TextStyle(color: Color(0xFFE8CE8C), fontSize: 28, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   const Text('Administrative Control Panel', style: TextStyle(color: Colors.white70, fontSize: 14)),
                   const SizedBox(height: 40),
@@ -154,8 +154,8 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                           width: double.infinity, height: 50,
                           child: ElevatedButton(
                             onPressed: _isLoading ? null : _login,
-                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E3A8A), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                            child: _isLoading ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Access Admin Panel', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD4AF37), foregroundColor: const Color(0xFF171204), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                            child: _isLoading ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Color(0xFF171204), strokeWidth: 2)) : const Text('Access Admin Panel', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                           ),
                         ),
                         const SizedBox(height: 12),

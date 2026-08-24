@@ -106,16 +106,21 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> with Widget
 
         return Scaffold(
           backgroundColor: c.scaffoldBg,
-          body: IndexedStack(
-            index: _currentIndex,
-            children: const [
-              DashboardScreen(),
-              NewsScreen(),
-              FinanceScreen(),
-              ProfileScreen(),
-              ReferralScreen(),
-              SettingsScreen(),
-            ],
+          body: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: IndexedStack(
+                index: _currentIndex,
+                children: const [
+                  DashboardScreen(),
+                  NewsScreen(),
+                  FinanceScreen(),
+                  ProfileScreen(),
+                  ReferralScreen(),
+                  SettingsScreen(),
+                ],
+              ),
+            ),
           ),
           bottomNavigationBar: Container(
             decoration: BoxDecoration(

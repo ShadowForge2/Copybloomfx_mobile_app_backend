@@ -57,7 +57,7 @@ class AdminSupportProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     } catch (e) {
-      _errorMessage = 'Failed to load conversations: $e';
+      _errorMessage = 'Failed to load conversations. Please try again.';
       _isLoading = false;
       notifyListeners();
     }
@@ -83,7 +83,7 @@ class AdminSupportProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     } catch (e) {
-      _errorMessage = 'Failed to load conversation: $e';
+      _errorMessage = 'Failed to load conversation. Please try again.';
       _isLoading = false;
       notifyListeners();
     }
@@ -138,7 +138,7 @@ class AdminSupportProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     } catch (e) {
-      _errorMessage = 'Error sending message: $e';
+      _errorMessage = 'Failed to send message. Please try again.';
       _isSending = false;
       notifyListeners();
       return false;
@@ -200,7 +200,7 @@ class AdminSupportProvider extends ChangeNotifier {
       }
       return success;
     } catch (e) {
-      _errorMessage = 'Error closing conversation: $e';
+      _errorMessage = 'Failed to close conversation. Please try again.';
       notifyListeners();
       return false;
     }

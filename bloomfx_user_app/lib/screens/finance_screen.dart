@@ -331,107 +331,6 @@ class _FinanceScreenState extends State<FinanceScreen> {
     );
   }
 
-  Widget _buildLocalAdminSimulation(DashboardProvider dash, AppColors c) {
-    final deposits = dash.finance?.deposits ?? const <UserDeposit>[];
-    final withdrawals = dash.finance?.withdrawals ?? const <UserWithdrawal>[];
-    final pendingD = deposits.where((d) => d.status == 'pending').toList();
-    final pendingW = withdrawals.where((w) => w.status == 'pending').toList();
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: c.surfaceBg,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFFF9800)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Local demo — simulate admin (until admin app exists)',
-            style: TextStyle(
-              color: Color(0xFFFFB74D),
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (pendingD.isEmpty && pendingW.isEmpty)
-            Text('No pending items.', style: TextStyle(color: c.textSecondary, fontSize: 12))
-          else ...[
-            ...pendingD.map(
-              (d) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Deposit #${d.id} \$${d.amount.toStringAsFixed(2)} ${d.network}',
-                        style: const TextStyle(color: Colors.white70, fontSize: 11),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        await dash.devApproveDeposit(d.id);
-                        if (context.mounted) {
-                          Fluttertoast.showToast(msg: 'Deposit approved (demo)');
-                        }
-                      },
-                      child: const Text('Approve', style: TextStyle(fontSize: 11)),
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        await dash.devRejectDeposit(d.id);
-                        if (context.mounted) {
-                          Fluttertoast.showToast(msg: 'Deposit rejected (demo)');
-                        }
-                      },
-                      child: const Text('Reject', style: TextStyle(fontSize: 11)),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            ...pendingW.map(
-              (w) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Withdraw #${w.id} \$${w.amount.toStringAsFixed(2)}',
-                        style: const TextStyle(color: Colors.white70, fontSize: 11),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        await dash.devApproveWithdrawal(w.id);
-                        if (context.mounted) {
-                          Fluttertoast.showToast(msg: 'Withdrawal approved (demo)');
-                        }
-                      },
-                      child: const Text('Approve', style: TextStyle(fontSize: 11)),
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        await dash.devRejectWithdrawal(w.id);
-                        if (context.mounted) {
-                          Fluttertoast.showToast(msg: 'Withdrawal rejected — refunded (demo)');
-                        }
-                      },
-                      child: const Text('Reject', style: TextStyle(fontSize: 11)),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   Widget _buildTransactionHistory(DashboardProvider dash, AppColors c) {
     final deposits = dash.finance?.deposits ?? const <UserDeposit>[];
     final withdrawals = dash.finance?.withdrawals ?? const <UserWithdrawal>[];
@@ -1149,7 +1048,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
               icon: Icons.account_balance,
               title: 'Bank Transfer',
               subtitle: 'Withdraw to your local bank account',
-              color: Colors.blue,
+              color: Color(0xFF9C7A28),
               onTap: () {
                 Navigator.pop(context);
                 _showBankWithdrawalUnavailable(c);

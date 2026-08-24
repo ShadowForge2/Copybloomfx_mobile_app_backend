@@ -51,7 +51,7 @@ class AdminNotificationProvider extends ChangeNotifier {
       }
     } catch (e) {
       _isLoading = false;
-      _errorMessage = 'Failed to send notification: $e';
+      _errorMessage = 'Failed to send notification. Please try again.';
       _showToast('Failed to send notification', Colors.red);
       notifyListeners();
       return false;

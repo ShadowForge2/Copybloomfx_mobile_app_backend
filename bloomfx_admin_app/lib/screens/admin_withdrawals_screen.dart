@@ -72,9 +72,9 @@ class _StatusChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFF1E3A8A) : const Color(0xFF0D1117),
+          color: selected ? const Color(0xFFD4AF37) : const Color(0xFF0D1117),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? const Color(0xFF1E3A8A) : Colors.white24),
+          border: Border.all(color: selected ? const Color(0xFFD4AF37) : Colors.white24),
         ),
         child: Text(label, style: TextStyle(color: selected ? Colors.white : Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
       ),
@@ -135,7 +135,7 @@ class _WithdrawalCard extends StatelessWidget {
             const SizedBox(height: 8),
             Row(
               children: [
-                const Text('\$', style: TextStyle(color: Color(0xFF1E3A8A), fontWeight: FontWeight.bold, fontSize: 18)),
+                const Text('\$', style: TextStyle(color: Color(0xFFD4AF37), fontWeight: FontWeight.bold, fontSize: 18)),
                 Text(withdrawal.amount.toStringAsFixed(2), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
                 const Spacer(),
                 _Badge(label: withdrawal.network),

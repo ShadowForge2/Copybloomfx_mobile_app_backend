@@ -132,7 +132,7 @@ class _NewsScreenState extends State<NewsScreen> with WidgetsBindingObserver {
       ),
       child: Row(
         children: [
-          const Icon(Icons.newspaper, color: Color(0xFF58A6FF), size: 24),
+          const Icon(Icons.newspaper, color: Color(0xFFD4AF37), size: 24),
           const SizedBox(width: 12),
           const Text('Market News', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
           const Spacer(),
@@ -239,7 +239,7 @@ class _NewsCard extends StatelessWidget {
     if (msg.contains('volatility') || msg.contains('warning') || msg.contains('extreme')) return Colors.orange;
     if (msg.contains('risk') || msg.contains('bearish') || msg.contains('decline') || msg.contains('unstable')) return Colors.red;
     if (msg.contains('bullish') || msg.contains('profit') || msg.contains('opportunity') || msg.contains('support')) return Colors.green;
-    if (msg.contains('ai ') || msg.contains('automated') || msg.contains('intelligence')) return const Color(0xFF58A6FF);
+    if (msg.contains('ai ') || msg.contains('automated') || msg.contains('intelligence')) return const Color(0xFFD4AF37);
     return const Color(0xFF7D8590);
   }
 }

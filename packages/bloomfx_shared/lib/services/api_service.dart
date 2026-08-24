@@ -48,12 +48,12 @@ class ApiService {
         return 'Request timed out. The server may be starting up. Please try again.';
       }
       if (msg.contains('xmlhttprequest') || msg.contains('failed to fetch')) {
-        return 'Unable to reach the server (CORS/network). Check that the backend is running and accessible.';
+        return 'Unable to reach the server. Please check your internet connection and try again.';
       }
       return 'Unable to connect to the server. Please try again later.';
     }
     if (e is TimeoutException) {
-      return 'Request timed out. If hosted on Render, the server may be cold-starting (takes up to 60s). Please try again.';
+      return 'The request timed out. The server may be busy — please try again.';
     }
     return 'Something went wrong. Please try again.';
   }
@@ -127,6 +127,12 @@ class ApiService {
       } catch (_) {}
     }
     final success = res.statusCode >= 200 && res.statusCode < 300;
+    // Never surface raw server-side exception text (5xx) to users —
+    // it can contain database/hosting internals. Keep 4xx messages
+    // since they are intentional business validations.
+    if (!success && res.statusCode >= 500) {
+      message = 'Something went wrong on our side. Please try again shortly.';
+    }
     return ApiResponse(success: success, data: data, message: message);
   }
 

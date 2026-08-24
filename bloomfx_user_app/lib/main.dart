@@ -136,7 +136,7 @@ class MyApp extends StatelessWidget {
       child: Consumer2<ThemeProvider, LanguageProvider>(
         builder: (context, themeProvider, langProvider, _) {
           return MaterialApp.router(
-            title: 'BloomFX User App',
+            title: 'CPBloomFX',
             debugShowCheckedModeBanner: false,
             theme: themeProvider.themeData,
             locale: langProvider.locale,

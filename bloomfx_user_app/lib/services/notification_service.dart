@@ -64,7 +64,7 @@ class NotificationService {
       importance: Importance.high,
       priority: Priority.high,
       playSound: true,
-      color: Color(0xFF58A6FF),
+      color: Color(0xFFD4AF37),
       icon: '@mipmap/ic_launcher',
     );
 
@@ -100,7 +100,7 @@ class NotificationService {
       importance: Importance.high,
       priority: Priority.high,
       playSound: true,
-      color: Color(0xFF58A6FF),
+      color: Color(0xFFD4AF37),
       icon: '@mipmap/ic_launcher',
     );
 
@@ -221,7 +221,7 @@ class NotificationService {
       importance: Importance.high,
       priority: Priority.high,
       playSound: true,
-      color: Color(0xFF58A6FF),
+      color: Color(0xFFD4AF37),
       icon: '@mipmap/ic_launcher',
     );
 

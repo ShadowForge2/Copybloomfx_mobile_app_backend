@@ -53,7 +53,7 @@ class AdminDashboardProvider extends ChangeNotifier {
         _errorMessage = res.message.isNotEmpty ? res.message : 'Cannot reach server';
       }
     } on TimeoutException catch (_) {
-      _errorMessage = 'Server not responding (timeout). The backend may be cold-starting — pull down to retry.';
+      _errorMessage = 'The server is taking too long to respond. Pull down to retry.';
     } catch (e) {
       if (_useLocalOnly) {
         _stats = AdminDashboardStats(
@@ -66,7 +66,7 @@ class AdminDashboardProvider extends ChangeNotifier {
           bannedUsers: 1,
         );
       } else {
-        _errorMessage = 'Cannot load stats: ${e.toString().length > 100 ? e.toString().substring(0, 100) : e}';
+        _errorMessage = 'Could not load stats. Pull down to retry.';
       }
     } finally {
       _isLoading = false;

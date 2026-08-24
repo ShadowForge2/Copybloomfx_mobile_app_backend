@@ -59,7 +59,7 @@ class AdminPromoProvider extends ChangeNotifier {
         _promos = _createMockPromos();
         _redemptions = _createMockRedemptions();
       } else {
-        _errorMessage = 'Failed to load promos: $e';
+        _errorMessage = 'Failed to load promo codes. Please try again.';
       }
     }
 

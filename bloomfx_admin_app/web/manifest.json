@@ -1,11 +1,11 @@
 {
-    "name": "bloomfx_admin_app",
-    "short_name": "bloomfx_admin_app",
+    "name": "CPBloomFX Admin",
+    "short_name": "CPBloomFX Admin",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0A0D13",
+    "theme_color": "#D4AF37",
+    "description": "CPBloomFX Admin — administrative control panel",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

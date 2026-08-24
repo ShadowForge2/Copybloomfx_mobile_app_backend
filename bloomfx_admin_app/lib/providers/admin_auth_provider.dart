@@ -48,7 +48,7 @@ class AdminAuthProvider extends ChangeNotifier {
             return false;
           }
           if (token.isEmpty) {
-            _errorMessage = 'Login succeeded but no token was returned';
+            _errorMessage = 'Login succeeded but the server response was incomplete. Please try again.';
             notifyListeners();
             return false;
           }
@@ -71,7 +71,7 @@ class AdminAuthProvider extends ChangeNotifier {
       return false;
     } on TimeoutException {
       _errorMessage =
-          'Server timed out. If hosted on Render, it may be cold-starting (up to 30-60s). Please try again.';
+          'The server is taking too long to respond — it may be waking up. Please try again.';
       notifyListeners();
       return false;
     } catch (e, st) {

@@ -82,10 +82,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1E3A8A),
+      backgroundColor: const Color(0xFF0A0D13),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -98,7 +101,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               const SizedBox(height: 20),
               const Text(
-                'BloomFX',
+                'CPBloomFX',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
@@ -141,7 +144,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         style: TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF1E3A8A),
+                          color: Color(0xFF9C7A28),
                         ),
                       ),
                       const SizedBox(height: 30),
@@ -243,7 +246,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         child: ElevatedButton(
                           onPressed: _isLoading ? null : _register,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1E3A8A),
+                            backgroundColor: const Color(0xFF9C7A28),
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -270,7 +273,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         child: const Text(
                           'Already have an account? Login',
                           style: TextStyle(
-                            color: Color(0xFF1E3A8A),
+                            color: Color(0xFF9C7A28),
                           ),
                         ),
                       ),
@@ -281,6 +284,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ],
           ),
         ),
+        ),
+      ),
       ),
     );
   }

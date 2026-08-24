@@ -35,7 +35,7 @@ class _AdminPromosScreenState extends State<AdminPromosScreen> {
                   onPressed: () => _showCreatePromoDialog(context),
                   icon: const Icon(Icons.add),
                   label: const Text('Create Promo Code'),
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E3A8A), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD4AF37), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                 ),
               ),
             ),
@@ -268,7 +268,7 @@ class _RedemptionCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 4),
       child: ListTile(
         dense: true,
-        leading: CircleAvatar(radius: 14, backgroundColor: const Color(0xFF1E3A8A), child: Text(redemption.userName.isNotEmpty ? redemption.userName[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white, fontSize: 12))),
+        leading: CircleAvatar(radius: 14, backgroundColor: const Color(0xFFD4AF37), child: Text(redemption.userName.isNotEmpty ? redemption.userName[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white, fontSize: 12))),
         title: Text(redemption.userName, style: const TextStyle(color: Colors.white, fontSize: 13)),
         subtitle: Text('Code: ${redemption.promoCode}', style: TextStyle(color: Colors.grey[400], fontSize: 11)),
         trailing: Column(

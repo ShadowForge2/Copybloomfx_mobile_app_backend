@@ -52,7 +52,7 @@ class AdminDepositProvider extends ChangeNotifier {
       if (_useLocalOnly) {
         _deposits = _createMockDeposits();
       } else {
-        _errorMessage = 'Failed to load deposits: $e';
+        _errorMessage = 'Failed to load deposits. Please try again.';
       }
     } finally {
       _isLoading = false;

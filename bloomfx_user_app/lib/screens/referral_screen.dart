@@ -124,7 +124,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: _loadReferrals,
-                  color: const Color(0xFF58A6FF),
+                  color: const Color(0xFFD4AF37),
                   child: SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.all(16),
@@ -158,7 +158,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.people, color: Color(0xFF58A6FF), size: 24),
+          const Icon(Icons.people, color: Color(0xFFD4AF37), size: 24),
           const SizedBox(width: 12),
           const Text('Referrals', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
           const Spacer(),
@@ -196,7 +196,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.monetization_on, color: Color(0xFF58A6FF), size: 32),
+          const Icon(Icons.monetization_on, color: Color(0xFFD4AF37), size: 32),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -251,7 +251,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1E3A8A),
+                    color: const Color(0xFF9C7A28),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(Icons.copy, color: Colors.white, size: 20),
@@ -310,7 +310,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
           const Text('My Referrals', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 16),
           if (_loadingReferrals)
-            const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator(color: Color(0xFF58A6FF))))
+            const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator(color: Color(0xFFD4AF37))))
           else if (_referralLoadError != null)
             Text(_referralLoadError!, style: const TextStyle(color: Colors.orange, fontSize: 12))
           else if (_referrals.isEmpty)
@@ -348,7 +348,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
                 if (entry.totalCommission > 0)
                   Text(
                     'Earned: \$${entry.totalCommission.toStringAsFixed(2)}',
-                    style: const TextStyle(color: Color(0xFF58A6FF), fontSize: 10),
+                    style: const TextStyle(color: Color(0xFFD4AF37), fontSize: 10),
                   ),
               ],
             ),

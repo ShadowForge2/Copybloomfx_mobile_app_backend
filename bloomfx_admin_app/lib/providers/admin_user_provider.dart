@@ -65,7 +65,7 @@ class AdminUserProvider extends ChangeNotifier {
       if (_useLocalOnly) {
         _users = _createMockUsers();
       } else {
-        _errorMessage = 'Failed to load users: $e';
+        _errorMessage = 'Failed to load users. Please try again.';
       }
     } finally {
       _isLoading = false;

@@ -126,9 +126,9 @@ class _FilterChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFF1E3A8A) : const Color(0xFF0D1117),
+          color: selected ? const Color(0xFFD4AF37) : const Color(0xFF0D1117),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? const Color(0xFF1E3A8A) : Colors.white24),
+          border: Border.all(color: selected ? const Color(0xFFD4AF37) : Colors.white24),
         ),
         child: Text(label, style: TextStyle(color: selected ? Colors.white : Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
       ),
@@ -156,7 +156,7 @@ class _UserCard extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 20,
-                  backgroundColor: const Color(0xFF1E3A8A),
+                  backgroundColor: const Color(0xFFD4AF37),
                   child: Text(_userInitial(user), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
                 const SizedBox(width: 12),

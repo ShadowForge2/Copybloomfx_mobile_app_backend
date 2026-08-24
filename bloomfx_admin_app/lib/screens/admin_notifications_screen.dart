@@ -153,7 +153,7 @@ class _AdminNotificationsScreenState extends State<AdminNotificationsScreen> {
                 child: ElevatedButton(
                   onPressed: provider.isLoading ? null : _send,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E3A8A),
+                    backgroundColor: const Color(0xFFD4AF37),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   child: provider.isLoading

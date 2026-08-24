@@ -122,10 +122,13 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1E3A8A),
+      backgroundColor: const Color(0xFF0A0D13),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -138,7 +141,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
               ),
               const SizedBox(height: 20),
               const Text(
-                'BloomFX',
+                'CPBloomFX',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
@@ -181,7 +184,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                         style: TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF1E3A8A),
+                          color: Color(0xFF9C7A28),
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -248,7 +251,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                         child: ElevatedButton(
                           onPressed: _isLoading ? null : _completeRegistration,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1E3A8A),
+                            backgroundColor: const Color(0xFF9C7A28),
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -275,7 +278,7 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
                         child: const Text(
                           'Go Back',
                           style: TextStyle(
-                            color: Color(0xFF1E3A8A),
+                            color: Color(0xFF9C7A28),
                           ),
                         ),
                       ),
@@ -286,6 +289,8 @@ class _UsernameSetupScreenState extends State<UsernameSetupScreen> {
             ],
           ),
         ),
+        ),
+      ),
       ),
     );
   }

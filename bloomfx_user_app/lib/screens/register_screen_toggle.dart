@@ -108,10 +108,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1E3A8A),
+      backgroundColor: const Color(0xFF0A0D13),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -124,7 +127,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               const SizedBox(height: 20),
               const Text(
-                'BloomFX',
+                'CPBloomFX',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
@@ -168,7 +171,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             'Quick Register',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: _showQuickRegister ? const Color(0xFF1E3A8A) : Colors.white70,
+                              color: _showQuickRegister ? const Color(0xFF9C7A28) : Colors.white70,
                               fontWeight: _showQuickRegister ? FontWeight.bold : FontWeight.normal,
                             ),
                           ),
@@ -191,7 +194,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             'Detailed Register',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: !_showQuickRegister ? const Color(0xFF1E3A8A) : Colors.white70,
+                              color: !_showQuickRegister ? const Color(0xFF9C7A28) : Colors.white70,
                               fontWeight: !_showQuickRegister ? FontWeight.bold : FontWeight.normal,
                             ),
                           ),
@@ -229,7 +232,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         style: const TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF1E3A8A),
+                          color: Color(0xFF9C7A28),
                         ),
                       ),
                       
@@ -350,22 +353,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.blue.withValues(alpha: 0.1),
+                            color: const Color(0xFFD4AF37).withValues(alpha: 0.08),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+                            border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.3)),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
                                 children: [
-                                  const Icon(Icons.info, color: Colors.blue, size: 20),
+                                  const Icon(Icons.info, color: Color(0xFFD4AF37), size: 20),
                                   const SizedBox(width: 8),
                                   const Text(
                                     'Detailed Registration Includes:',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.blue,
+                                      color: Color(0xFFE8CE8C),
                                     ),
                                   ),
                                 ],
@@ -401,7 +404,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           onPressed: _isLoading ? null 
                               : _showQuickRegister ? _quickRegister : _detailedRegister,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1E3A8A),
+                            backgroundColor: const Color(0xFF9C7A28),
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -430,7 +433,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         child: const Text(
                           'Already have an account? Login',
                           style: TextStyle(
-                            color: Color(0xFF1E3A8A),
+                            color: Color(0xFF9C7A28),
                           ),
                         ),
                       ),
@@ -441,6 +444,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ],
           ),
         ),
+        ),
+      ),
       ),
     );
   }

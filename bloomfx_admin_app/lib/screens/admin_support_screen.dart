@@ -378,7 +378,7 @@ class _AdminSupportScreenState extends State<AdminSupportScreen> {
                           ),
                           decoration: BoxDecoration(
                             color: isAdminMessage
-                                ? const Color(0xFF1E3A8A)
+                                ? const Color(0xFFD4AF37)
                                 : const Color(0xFF21262D),
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -450,7 +450,7 @@ class _AdminSupportScreenState extends State<AdminSupportScreen> {
                   onPressed: support.isSending ? null : _sendReply,
                   backgroundColor: support.isSending
                       ? const Color(0xFF30363D)
-                      : const Color(0xFF1E3A8A),
+                      : const Color(0xFFD4AF37),
                   disabledElevation: 0,
                   child: support.isSending
                       ? const SizedBox(

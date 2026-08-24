@@ -87,9 +87,9 @@ class AdminDashboardScreenState extends State<AdminDashboardScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('BlooxFX Admin'),
-        backgroundColor: const Color(0xFF1E3A8A),
-        foregroundColor: Colors.white,
+        title: const Text('CPBloomFX Admin'),
+        backgroundColor: const Color(0xFF0A0D13),
+        foregroundColor: Color(0xFFE8CE8C),
         elevation: 0,
         actions: [
           Consumer<AdminAuthProvider>(
@@ -109,7 +109,7 @@ class AdminDashboardScreenState extends State<AdminDashboardScreen>
                   icon: const Icon(Icons.logout),
                   onPressed: () async {
                     await auth.logout();
-                    if (context.mounted) context.go('/admin/login');
+                    if (context.mounted) context.go('/login');
                   },
                 ),
               ],
@@ -117,11 +117,16 @@ class AdminDashboardScreenState extends State<AdminDashboardScreen>
           ),
         ],
       ),
-      body: _pages[currentIndex],
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1100),
+          child: _pages[currentIndex],
+        ),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: currentIndex,
         backgroundColor: const Color(0xFF1A1F2E),
-        indicatorColor: const Color(0xFF1E3A8A),
+        indicatorColor: const Color(0xFFD4AF37),
         onDestinationSelected: (i) => setState(() => currentIndex = i),
         destinations: <NavigationDestination>[
           const NavigationDestination(

@@ -63,7 +63,7 @@ class SupportProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     } catch (e) {
-      _errorMessage = 'Error initializing support chat: $e';
+      _errorMessage = 'Could not start the chat. Please try again.';
       _isLoading = false;
       notifyListeners();
     }
@@ -85,7 +85,7 @@ class SupportProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     } catch (e) {
-      _errorMessage = 'Failed to load messages: $e';
+      _errorMessage = 'Failed to load messages. Please try again.';
       _isLoading = false;
       notifyListeners();
     }
@@ -132,7 +132,7 @@ class SupportProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     } catch (e) {
-      _errorMessage = 'Error sending message: $e';
+      _errorMessage = 'Failed to send message. Please try again.';
       _isSending = false;
       notifyListeners();
       return false;
@@ -183,7 +183,7 @@ class SupportProvider extends ChangeNotifier {
       }
       return success;
     } catch (e) {
-      _errorMessage = 'Error closing conversation: $e';
+      _errorMessage = 'Failed to close conversation. Please try again.';
       notifyListeners();
       return false;
     }

@@ -123,7 +123,7 @@ void showNotificationSheet(BuildContext context) {
                           onTap: () => notifProvider.markAllAsRead(),
                           child: const Text(
                             'Mark all read',
-                            style: TextStyle(color: Color(0xFF58A6FF), fontSize: 12),
+                            style: TextStyle(color: Color(0xFFD4AF37), fontSize: 12),
                           ),
                         ),
                     ],
@@ -207,7 +207,7 @@ Widget _buildNotificationItem(AppNotification n, {VoidCallback? onTap}) {
                         width: 8,
                         height: 8,
                         decoration: const BoxDecoration(
-                          color: Color(0xFF58A6FF),
+                          color: Color(0xFFD4AF37),
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -252,7 +252,7 @@ IconData _notificationIcon(NotificationType type) {
 Color _notificationColor(NotificationType type) {
   switch (type) {
     case NotificationType.info:
-      return const Color(0xFF58A6FF);
+      return const Color(0xFFD4AF37);
     case NotificationType.warning:
       return const Color(0xFFFFA726);
     case NotificationType.success:

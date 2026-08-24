@@ -67,7 +67,7 @@ class NotificationProvider extends ChangeNotifier with WidgetsBindingObserver {
     return [
       AppNotification(
         id: '1',
-        title: 'Welcome to BloomFX',
+        title: 'Welcome to CPBloomFX',
         message: 'Your account is active. Start by making a deposit to unlock copy trading features.',
         type: NotificationType.info,
         isRead: false,
