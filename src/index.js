@@ -65,7 +65,7 @@ app.get('/health', (_, res) => {
 app.get('/api/health', (_, res) => res.json({ ok: true, uptime: process.uptime() }));
 
 // Diagnostic endpoint — check deposits table schema (no auth required)
-app.get('/api/debug/deposits-schema', (_req, res) => {
+app.get('/api/debug/deposits-schema', async (_req, res) => {
   if (process.env.ENABLE_DEBUG_ENDPOINTS !== 'true') {
     return res.status(404).json({ error: 'Route not found' });
   }
