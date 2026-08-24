@@ -201,7 +201,6 @@ class _SplashScreenState extends State<SplashScreen>
                     fontSize: 12,
                     letterSpacing: 4,
                   ),
-                ),
                 )
                     .animate(delay: 1400.ms)
                     .fadeIn(duration: 1200.ms),

@@ -128,7 +128,7 @@ export async function processUserDepositsExpiry(userId, ip = '') {
     if (d.status === 'approved' && isApprovedLockExpired(d, now)) {
       if (await expireApprovedDeposit(d, { ip, reason: 'user_refresh' })) approvedCount++;
     }
-    // Auto-reject MaxelPay pending deposits older than 30 min (webhook didn't arrive)
+    // Auto-reject MaxelPay pending deposits older than 15 min (webhook didn't arrive)
     if (d.status === 'pending' && d.network === 'MaxelPay' && d.created_at) {
       const ageMs = now.getTime() - new Date(d.created_at).getTime();
       if (ageMs > MAXELPAY_PENDING_MINUTES * 60 * 1000) {

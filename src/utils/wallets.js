@@ -122,44 +122,50 @@ export function getRandomWallet(network) {
 // In-memory assignment tracker: deposit_id -> { wallet, assigned_at, expires_at }
 const activeAssignments = new Map();
 
-export function assignWallet(network, depositId) {
+const FIVE_MIN = 5 * 60 * 1000;
+
+function availableWallet(network) {
   const wallets = WALLETS[network];
   if (!wallets || wallets.length === 0) return null;
 
   const now = Date.now();
-  const FIVE_MIN = 5 * 60 * 1000;
 
   // Clean expired assignments
   for (const [key, val] of activeAssignments) {
     if (now > val.expires_at) activeAssignments.delete(key);
   }
 
-  // Find wallets currently in use
+  // Find wallets currently in use (case-insensitive: ERC20 lists are checksummed)
   const inUse = new Set();
   for (const val of activeAssignments.values()) {
-    inUse.add(val.wallet);
+    inUse.add(val.wallet.toLowerCase());
   }
 
-  // Pick first available wallet
-  let wallet = null;
+  // Pick first available wallet; if all in use, fall back to random
   for (const w of wallets) {
-    if (!inUse.has(w.toLowerCase())) {
-      wallet = w;
-      break;
-    }
+    if (!inUse.has(w.toLowerCase())) return w;
   }
+  return wallets[Math.floor(Math.random() * wallets.length)];
+}
 
-  // If all wallets in use, reuse the oldest expired or pick random
-  if (!wallet) {
-    wallet = wallets[Math.floor(Math.random() * wallets.length)];
-  }
+/** Pick a wallet without registering it — bind it afterwards with bindAssignment(). */
+export function pickAvailableWallet(network) {
+  return availableWallet(network);
+}
 
+export function bindAssignment(depositId, wallet) {
+  const now = Date.now();
   activeAssignments.set(depositId, {
     wallet,
     assigned_at: now,
     expires_at: now + FIVE_MIN,
   });
+}
 
+export function assignWallet(network, depositId) {
+  const wallet = availableWallet(network);
+  if (!wallet) return null;
+  bindAssignment(depositId, wallet);
   return wallet;
 }
 

@@ -20,7 +20,7 @@ import {
   processUserDepositsExpiry,
   resolveReferrerUserId,
 } from '../services/depositExpiry.js';
-import { NETWORKS, assignWallet, getAssignment, releaseAssignment } from '../utils/wallets.js';
+import { NETWORKS, pickAvailableWallet, bindAssignment, getAssignment, releaseAssignment } from '../utils/wallets.js';
 import { paystackInit, paystackVerify, convertNGNtoUSD } from '../utils/paystack.js';
 import { createPaymentSession, verifyWebhookSignature } from '../utils/maxelpay.js';
 import { payReferralCommission } from '../services/referralCommission.js';
@@ -91,28 +91,13 @@ router.post('/maxelpay/webhook', async (req, res) => {
   }
 });
 
-router.get('/maxelpay/success', async (req, res) => {
+router.get('/maxelpay/success', (req, res) => {
+  // Redirect only — crediting happens exclusively via the signature-verified
+  // webhook. Never approve deposits here: this endpoint is unauthenticated and
+  // the orderId is known to the client.
   const { orderId } = req.query;
-  if (orderId) {
-    const deposits = await getDeposits({ reference: orderId, network: 'MaxelPay' }).catch(() => []);
-    if (deposits.length && deposits[0].status === 'pending') {
-      const approvedAt = new Date();
-      await updateDeposit(deposits[0].id, {
-        status: 'approved',
-        approved_at: approvedAt,
-        expires_at: approvedLockExpiresAt(approvedAt),
-      }).catch(() => {});
-      const profile = await getProfile(deposits[0].user_id).catch(() => null);
-      if (profile) {
-        await updateProfile(deposits[0].user_id, {
-          locked_balance: toNum(profile.locked_balance) + toNum(deposits[0].amount),
-        }).catch(() => {});
-      }
-    }
-    const redirectUrl = `${process.env.CORS_ORIGIN || 'https://copybloomfx.com'}/payment/success?orderId=${orderId}`;
-    return res.redirect(redirectUrl);
-  }
-  res.redirect(process.env.CORS_ORIGIN || 'https://copybloomfx.com');
+  const origin = process.env.CORS_ORIGIN || 'https://copybloomfx.com';
+  return res.redirect(orderId ? `${origin}/payment/success?orderId=${orderId}` : origin);
 });
 
 router.get('/maxelpay/cancel', (_req, res) => {
@@ -335,7 +320,7 @@ router.post('/deposits', async (req, res) => {
     if (isNaN(amt) || amt < MIN_DEPOSIT) return res.status(400).json({ error: `Minimum deposit $${MIN_DEPOSIT}` });
     if (!NETWORKS.includes(network)) return res.status(400).json({ error: 'Invalid network' });
 
-    const wallet = assignWallet(network, null);
+    const wallet = pickAvailableWallet(network);
     if (!wallet) return res.status(500).json({ error: 'No wallet available for this network' });
 
     const [refProfile, profile] = await Promise.all([
@@ -357,7 +342,7 @@ router.post('/deposits', async (req, res) => {
       expires_at: null,
       referrer_id: referrerId,
     });
-    assignWallet(network, d.id);
+    bindAssignment(d.id, wallet);
 
     createNotification(req.user.id, 'Deposit Pending', `Your deposit of $${amt.toFixed(2)} is currently being reviewed and will be credited to your tradable balance once approved.`, 'info').catch(() => {});
 
@@ -699,7 +684,7 @@ router.post('/paystack/verify', async (req, res) => {
       return res.json({ status: 'already_credited', reference, message: 'Payment already processed' });
     }
 
-    const wallet = assignWallet('USDT BEP20', null) || 'Paystack';
+    const wallet = 'Paystack';
     const paystackApprovedAt = new Date();
     
     const [paystackDeposit] = await Promise.all([
@@ -873,7 +858,7 @@ router.post('/maxelpay/initialize', async (req, res) => {
       orderId,
       amount: amountUSD,
       currency: 'USD',
-      description: `Deposit $${amountUSD} to BloomFX`,
+      description: `Deposit $${amountUSD} to CPBloomFX`,
       callbackUrl,
       successUrl,
       cancelUrl,
