@@ -96,12 +96,13 @@ router.get('/maxelpay/success', (req, res) => {
   // webhook. Never approve deposits here: this endpoint is unauthenticated and
   // the orderId is known to the client.
   const { orderId } = req.query;
-  const origin = process.env.CORS_ORIGIN || 'https://copybloomfx.com';
+  const origin = (process.env.CORS_ORIGIN || 'https://xprfire.site').split(',')[0].trim();
   return res.redirect(orderId ? `${origin}/payment/success?orderId=${orderId}` : origin);
 });
 
 router.get('/maxelpay/cancel', (_req, res) => {
-  res.redirect(`${process.env.CORS_ORIGIN || 'https://copybloomfx.com'}/payment/cancel`);
+  const origin = (process.env.CORS_ORIGIN || 'https://xprfire.site').split(',')[0].trim();
+  res.redirect(`${origin}/payment/cancel`);
 });
 
 router.use(authMiddleware);

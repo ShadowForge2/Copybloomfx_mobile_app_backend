@@ -25,7 +25,21 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 const corsOrigin = process.env.CORS_ORIGIN;
 if (corsOrigin) {
-  app.use(cors({ origin: corsOrigin.split(',').map((s) => s.trim()), credentials: true }));
+  const origins = corsOrigin.split(',').map((s) => s.trim()).filter(Boolean);
+  const expanded = new Set();
+  for (const o of origins) {
+    expanded.add(o);
+    try {
+      const url = new URL(o);
+      const host = url.hostname;
+      if (host.startsWith('www.')) {
+        expanded.add(o.replace(host, host.slice(4)));
+      } else {
+        expanded.add(o.replace(host, 'www.' + host));
+      }
+    } catch (_) {}
+  }
+  app.use(cors({ origin: [...expanded], credentials: true }));
 } else {
   app.use(cors({ origin: true, credentials: true }));
 }
