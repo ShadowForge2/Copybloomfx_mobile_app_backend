@@ -9,6 +9,7 @@ class AdminDeposit {
   final String status;
   final DateTime createdAt;
   final DateTime? expiresAt;
+  final DateTime? walletExpiresAt;
   final bool isFlagged;
   final bool isBanned;
   final String? referrerCode;
@@ -24,10 +25,15 @@ class AdminDeposit {
     required this.status,
     required this.createdAt,
     this.expiresAt,
+    this.walletExpiresAt,
     this.isFlagged = false,
     this.isBanned = false,
     this.referrerCode,
   });
+
+  /// Crypto deposit whose wallet payment window lapsed without payment.
+  /// Auto-expired by the backend — the user's fault, no admin action needed.
+  bool get isPaymentTimeout => status == 'expired';
 
   factory AdminDeposit.fromJson(Map<String, dynamic> json) {
     final user = json['user'] as Map<String, dynamic>?;
@@ -44,6 +50,7 @@ class AdminDeposit {
       status: json['status']?.toString() ?? 'pending',
       createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ?? DateTime.now(),
       expiresAt: json['expiresAt'] != null ? DateTime.tryParse(json['expiresAt'].toString()) : null,
+      walletExpiresAt: json['walletExpiresAt'] != null ? DateTime.tryParse(json['walletExpiresAt'].toString()) : null,
       isFlagged: user?['isFlagged'] as bool? ?? json['isFlagged'] as bool? ?? false,
       isBanned: user?['isBanned'] as bool? ?? json['isBanned'] as bool? ?? false,
       referrerCode: json['referrerCode']?.toString(),
@@ -62,6 +69,7 @@ class AdminDeposit {
       status: status ?? this.status,
       createdAt: createdAt,
       expiresAt: expiresAt,
+      walletExpiresAt: walletExpiresAt,
       isFlagged: isFlagged,
       isBanned: isBanned,
       referrerCode: referrerCode,

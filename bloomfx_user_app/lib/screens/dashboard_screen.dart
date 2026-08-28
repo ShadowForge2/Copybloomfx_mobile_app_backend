@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
@@ -13,7 +15,11 @@ import '../widgets/copy_trading/copy_trades_hub.dart';
 import '../widgets/notification_ui.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  const DashboardScreen({super.key, this.activeIndex});
+
+  /// Current active tab index. When it becomes 0 (dashboard selected),
+  /// the rank ladder auto-scrolls to the user's current rank.
+  final ValueListenable<int>? activeIndex;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -26,6 +32,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    widget.activeIndex?.addListener(_onActiveIndexChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = context.read<AuthProvider>();
       context.read<DashboardProvider>().fetchDashboardData(userId: auth.user?.id);
@@ -35,8 +42,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    widget.activeIndex?.removeListener(_onActiveIndexChanged);
     _rankScrollController.dispose();
     super.dispose();
+  }
+
+  void _onActiveIndexChanged() {
+    if (widget.activeIndex?.value == 0 && mounted) {
+      _scrollToCurrentRank();
+    }
   }
 
   void _scrollToCurrentRank() {
@@ -95,12 +109,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (dashboardData?.pendingDeposits.isNotEmpty == true)
-                          ...dashboardData!.pendingDeposits.map(
+                        if (_activePendingBanners(dashboardData).isNotEmpty)
+                          ..._activePendingBanners(dashboardData).map(
                             (deposit) => _buildPendingDepositBanner(deposit, c),
                           ),
 
-                        if (dashboardData?.pendingDeposits.isNotEmpty == true)
+                        if (_activePendingBanners(dashboardData).isNotEmpty)
                           const SizedBox(height: 16),
 
                         const SizedBox(height: 24),
@@ -578,8 +592,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  /// Only show the payment banner while the generated wallet address is still
+  /// valid (within the wallet window). Once the address expires, hide the banner
+  /// so it isn't shown forever, but the pending deposit itself stays on the
+  /// backend for admin review and approval.
+  List<PendingDeposit> _activePendingBanners(DashboardData? data) {
+    final deposits = data?.pendingDeposits ?? const <PendingDeposit>[];
+    final now = DateTime.now();
+    return deposits.where((d) {
+      final expires = d.walletExpiresAt ?? d.expiresAt;
+      if (expires == null) return true;
+      return expires.isAfter(now);
+    }).toList();
+  }
+
+  String _walletTimeRemaining(PendingDeposit d) {
+    final expires = d.walletExpiresAt ?? d.expiresAt;
+    if (expires == null) return 'Awaiting admin approval';
+    final now = DateTime.now();
+    if (expires.isBefore(now)) return 'Address expired';
+    final remaining = expires.difference(now);
+    final minutes = remaining.inMinutes;
+    final secs = remaining.inSeconds % 60;
+    return '${minutes}m ${secs}s left';
+  }
+
   Widget _buildPendingDepositBanner(PendingDeposit deposit, AppColors c) {
-    final timeRemaining = deposit.getTimeRemaining();
+    final timeRemaining = _walletTimeRemaining(deposit);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -604,9 +643,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
               ),
-              Text(
-                'ID: ${deposit.id}',
-                style: const TextStyle(color: Color(0xFF666666), fontSize: 12),
+              Flexible(
+                child: Text(
+                  'ID: ${deposit.id}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Color(0xFF666666), fontSize: 12),
+                ),
               ),
             ],
           ),
@@ -617,9 +660,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           if (deposit.walletAddress != null && deposit.walletAddress!.isNotEmpty) ...[
             const SizedBox(height: 6),
-            SelectableText(
-              deposit.walletAddress!,
-              style: const TextStyle(color: Color(0xFF1565C0), fontSize: 11),
+            Row(
+              children: [
+                Expanded(
+                  child: SelectableText(
+                    deposit.walletAddress!,
+                    style: const TextStyle(color: Color(0xFF1565C0), fontSize: 11),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () async {
+                    final addr = deposit.walletAddress!.trim();
+                    await Clipboard.setData(ClipboardData(text: addr));
+                    if (mounted) {
+                      Fluttertoast.showToast(
+                        msg: 'Address copied',
+                        backgroundColor: Colors.green,
+                        textColor: Colors.white,
+                      );
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1565C0).withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.copy, color: Color(0xFF1565C0), size: 16),
+                        SizedBox(width: 4),
+                        Text(
+                          'Copy',
+                          style: TextStyle(color: Color(0xFF1565C0), fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ],
@@ -696,12 +778,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
         children: [
           Text(label, style: TextStyle(color: c.textSecondary, fontSize: 12)),
           const SizedBox(height: 4),
-          Text(
-            amount,
-            style: TextStyle(
-              color: color,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              amount,
+              maxLines: 1,
+              style: TextStyle(
+                color: color,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],

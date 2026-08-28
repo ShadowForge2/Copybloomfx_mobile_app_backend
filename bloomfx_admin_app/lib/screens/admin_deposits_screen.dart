@@ -37,6 +37,8 @@ class _AdminDepositsScreenState extends State<AdminDepositsScreen> {
                   _StatusChip(label: 'Approved', selected: provider.statusFilter == 'approved', onTap: () => provider.setStatusFilter('approved')),
                   const SizedBox(width: 8),
                   _StatusChip(label: 'Rejected', selected: provider.statusFilter == 'rejected', onTap: () => provider.setStatusFilter('rejected')),
+                  const SizedBox(width: 8),
+                  _StatusChip(label: 'Expired', selected: provider.statusFilter == 'expired', onTap: () => provider.setStatusFilter('expired')),
                 ],
               ),
             ),
@@ -89,7 +91,12 @@ class _DepositCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = deposit.status == 'approved' ? Colors.green : deposit.status == 'rejected' ? Colors.red : Colors.orange;
+    final statusColor = deposit.status == 'approved'
+        ? Colors.green
+        : deposit.status == 'rejected' || deposit.status == 'expired'
+            ? Colors.red
+            : Colors.orange;
+    final statusLabel = deposit.status == 'expired' ? 'PAYMENT TIMEOUT' : deposit.status.toUpperCase();
 
     return Card(
       color: const Color(0xFF1A1F2E),
@@ -113,7 +120,7 @@ class _DepositCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(color: statusColor.withOpacity(0.2), borderRadius: BorderRadius.circular(12), border: Border.all(color: statusColor)),
-                  child: Text(deposit.status.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold)),
+                  child: Text(statusLabel, style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold)),
                 ),
                 if (deposit.isFlagged || deposit.isBanned) ...[
                   const SizedBox(width: 4),
@@ -132,11 +139,39 @@ class _DepositCard extends StatelessWidget {
                 _InfoBadge(label: deposit.walletAddress ?? '---'),
               ],
             ),
+            if (deposit.walletExpiresAt != null) ...[
+              const SizedBox(height: 4),
+              Text('Wallet expires: ${_formatDate(deposit.walletExpiresAt!)}', style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+            ],
             if (deposit.expiresAt != null) ...[
               const SizedBox(height: 4),
-              Text('Expires: ${_formatDate(deposit.expiresAt!)}', style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+              Text('Lock expires: ${_formatDate(deposit.expiresAt!)}', style: TextStyle(color: Colors.grey[500], fontSize: 11)),
             ],
             Text('Created: ${_formatDate(deposit.createdAt)}', style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+            if (deposit.isPaymentTimeout) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.timer_off, color: Colors.red, size: 18),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Payment timeout — the user did not pay into the wallet address before it expired. Auto-expired: user\u2019s fault, no action needed.',
+                        style: TextStyle(color: Colors.red, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             if (deposit.status == 'pending') ...[
               const SizedBox(height: 8),
               Row(

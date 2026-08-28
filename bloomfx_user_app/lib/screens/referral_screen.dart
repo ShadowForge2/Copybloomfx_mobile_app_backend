@@ -205,7 +205,7 @@ class _ReferralScreenState extends State<ReferralScreen> {
                 Text('Earn 8% on Every Referral Deposit', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
                 SizedBox(height: 4),
                 Text(
-                  'When someone you refer makes a deposit, you earn 8% credited to your locked balance (same 30-day lock as deposits).',
+                  'You get 8% on every referral deposit, credited as tradable balance in your account.',
                   style: TextStyle(color: Colors.white54, fontSize: 12),
                 ),
               ],

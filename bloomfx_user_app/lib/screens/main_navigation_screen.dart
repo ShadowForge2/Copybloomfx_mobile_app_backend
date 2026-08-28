@@ -23,6 +23,7 @@ class MainNavigationScreen extends StatefulWidget {
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> with WidgetsBindingObserver {
   int _currentIndex = 0;
+  final ValueNotifier<int> _activeIndex = ValueNotifier<int>(0);
   int _unreadNewsCount = 0;
   bool _permissionsRequested = false;
   Timer? _unreadTimer;
@@ -47,6 +48,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> with Widget
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _unreadTimer?.cancel();
+    _activeIndex.dispose();
     super.dispose();
   }
 
@@ -65,6 +67,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> with Widget
 
   Future<void> _onTabSelected(int index) async {
     setState(() => _currentIndex = index);
+    _activeIndex.value = index;
     if (index == 1) {
       await NewsStorage.markViewed();
       _refreshUnreadCount();
@@ -111,13 +114,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> with Widget
               constraints: const BoxConstraints(maxWidth: 760),
               child: IndexedStack(
                 index: _currentIndex,
-                children: const [
-                  DashboardScreen(),
-                  NewsScreen(),
-                  FinanceScreen(),
-                  ProfileScreen(),
-                  ReferralScreen(),
-                  SettingsScreen(),
+                children: [
+                  DashboardScreen(activeIndex: _activeIndex),
+                  const NewsScreen(),
+                  const FinanceScreen(),
+                  const ProfileScreen(),
+                  const ReferralScreen(),
+                  const SettingsScreen(),
                 ],
               ),
             ),

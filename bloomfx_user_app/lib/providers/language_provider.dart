@@ -175,7 +175,7 @@ const _allTranslations = <String, Map<String, String>>{
     'settings.theme.sky': 'Sky Blue',
     'referral.title': 'Referrals',
     'referral.earn': 'Earn 8% on Every Referral Deposit',
-    'referral.desc': 'When someone you refer deposits or tops up, you get 8% credited to your locked balance instantly.',
+    'referral.desc': 'You get 8% on every referral deposit, credited as tradable balance in your account.',
     'referral.code': 'Your Referral Code',
     'referral.my': 'My Referrals',
     'referral.total': 'Total Referrals',

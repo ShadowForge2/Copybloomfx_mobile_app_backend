@@ -176,6 +176,7 @@ class PendingDeposit {
   final String network;
   final DateTime createdAt;
   final DateTime? expiresAt;
+  final DateTime? walletExpiresAt;
   final String? walletAddress;
   final String status;
 
@@ -185,6 +186,7 @@ class PendingDeposit {
     required this.network,
     required this.createdAt,
     this.expiresAt,
+    this.walletExpiresAt,
     this.walletAddress,
     this.status = 'pending',
   });
@@ -199,6 +201,9 @@ class PendingDeposit {
           DateTime.now(),
       expiresAt: json['expiresAt'] != null
           ? DateTime.tryParse(json['expiresAt'].toString())
+          : null,
+      walletExpiresAt: json['walletExpiresAt'] != null
+          ? DateTime.tryParse(json['walletExpiresAt'].toString())
           : null,
       walletAddress: json['walletAddress']?.toString(),
       status: json['status']?.toString() ?? 'pending',
@@ -1248,6 +1253,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
                   network: e.network,
                   createdAt: e.createdAt,
                   expiresAt: e.expiresAt,
+                  walletExpiresAt: e.walletExpiresAt,
                   walletAddress: e.walletAddress,
                   status: e.status,
                 ),

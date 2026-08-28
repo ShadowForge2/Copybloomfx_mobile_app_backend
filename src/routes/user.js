@@ -239,6 +239,7 @@ router.get('/dashboard', async (req, res) => {
         id: d.id, amount: toNum(d.amount), network: d.network,
         walletAddress: d.wallet_address, status: d.status,
         createdAt: d.created_at, expiresAt: d.expires_at,
+        walletExpiresAt: d.wallet_expires_at || (d.created_at ? walletAssignmentExpiresAt(d.created_at) : null),
       })),
       canClaimDaily, dailyRewardAmount: DAILY_REWARD_AMOUNT,
       ranks: ranks.map((r) => ({ id: r.id, name: r.name, minBalance: toNum(r.min_balance), maxBalance: rankMax(r), dailyProfitPct: toNum(r.daily_profit_pct), copyTradesLimit: r.copy_trades_limit, color: r.color, isCurrent: r.id === currentRankId })),

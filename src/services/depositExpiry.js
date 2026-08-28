@@ -16,7 +16,7 @@ import {
 } from '../config/data.js';
 import { toNum, addDays, addMinutes } from '../utils/helpers.js';
 
-export const WALLET_ASSIGNMENT_MINUTES = 5;
+export const WALLET_ASSIGNMENT_MINUTES = 10;
 export const LOCK_DAYS = 30;
 
 export const WALLET_ASSIGNMENT_MS = WALLET_ASSIGNMENT_MINUTES * 60 * 1000;
@@ -30,12 +30,20 @@ export function approvedLockExpiresAt(approvedAt = new Date()) {
   return addDays(new Date(approvedAt), LOCK_DAYS);
 }
 
-/** Crypto pending deposits are never auto-expired by cron or polling. */
-export function isPendingPaymentExpired() {
-  return false;
-}
-
 const MAXELPAY_PENDING_MINUTES = 15; /** auto-reject MaxelPay pending after 15 min — user has 15 min to complete payment */
+
+/**
+ * A crypto pending deposit is a payment timeout when the user hasn't paid into
+ * the generated wallet address before the wallet assignment window lapses.
+ * This is the user's fault (they didn't complete payment in time), so the
+ * deposit is auto-expired without requiring admin review.
+ */
+export function isCryptoWalletExpired(deposit, now = new Date()) {
+  if (deposit.status !== 'pending') return false;
+  if (deposit.network === 'MaxelPay') return false; // own 15-min window below
+  if (!deposit.created_at) return false;
+  return walletAssignmentExpiresAt(deposit.created_at) < now;
+}
 
 export function isApprovedLockExpired(deposit, now = new Date()) {
   if (deposit.status !== 'approved') return false;
@@ -124,6 +132,7 @@ export async function processUserDepositsExpiry(userId, ip = '') {
   const now = new Date();
   let approvedCount = 0;
   let rejectedCount = 0;
+  let expiredCount = 0;
   for (const d of deposits) {
     if (d.status === 'approved' && isApprovedLockExpired(d, now)) {
       if (await expireApprovedDeposit(d, { ip, reason: 'user_refresh' })) approvedCount++;
@@ -136,8 +145,27 @@ export async function processUserDepositsExpiry(userId, ip = '') {
         rejectedCount++;
       }
     }
+    // Crypto pending: wallet payment window lapsed → auto payment timeout (user's fault).
+    if (isCryptoWalletExpired(d, now)) {
+      await updateDepositIfStatus(d.id, 'pending', { status: 'expired' }).catch(() => {});
+      expiredCount++;
+    }
   }
-  return { pendingCount: 0, approvedCount, rejectedCount };
+  return { pendingCount: 0, approvedCount, rejectedCount, expiredCount };
+}
+
+/** Auto-expire any crypto pending deposit whose wallet payment window has lapsed (admin/global pass). */
+export async function processAllCryptoWalletExpiry() {
+  const pending = await getDeposits({ status: 'pending' }).catch(() => []);
+  const now = new Date();
+  let expiredCount = 0;
+  for (const d of pending) {
+    if (isCryptoWalletExpired(d, now)) {
+      await updateDepositIfStatus(d.id, 'pending', { status: 'expired' }).catch(() => {});
+      expiredCount++;
+    }
+  }
+  return expiredCount;
 }
 
 export async function auditUserBalanceConsistency(userId) {

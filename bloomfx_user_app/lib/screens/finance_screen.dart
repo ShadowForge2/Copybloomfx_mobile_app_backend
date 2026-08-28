@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:bloomfx_shared/bloomfx_shared.dart';
@@ -1201,9 +1202,9 @@ class _FinanceScreenState extends State<FinanceScreen> {
   }
 
   void _showPendingDepositDialog(UserDeposit dep, DashboardProvider dash, AppColors c) {
-    const fiveMin = Duration(minutes: 5);
+    const walletWindow = Duration(minutes: 10);
     const pollInterval = Duration(seconds: 3);
-    final walletCountdownEnd = dep.walletExpiresAt ?? DateTime.now().add(fiveMin);
+    final walletCountdownEnd = dep.walletExpiresAt ?? DateTime.now().add(walletWindow);
     final fixedExpiry = walletCountdownEnd;
     ValueNotifier<DateTime> expiresAtNotifier = ValueNotifier(fixedExpiry);
     ValueNotifier<String> statusNotifier = ValueNotifier('pending');
@@ -1364,9 +1365,49 @@ class _FinanceScreenState extends State<FinanceScreen> {
                               Text(dep.network, style: const TextStyle(color: Colors.white70, fontSize: 13)),
                               const SizedBox(height: 8),
                               Text('Wallet Address:', style: TextStyle(color: c.textSecondary, fontSize: 12)),
-                              SelectableText(
-                                dep.walletAddress ?? '',
-                                style: TextStyle(color: c.accentBlue, fontSize: 13),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: SelectableText(
+                                      dep.walletAddress ?? '',
+                                      style: TextStyle(color: c.accentBlue, fontSize: 13),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  InkWell(
+                                    onTap: () async {
+                                      final addr = (dep.walletAddress ?? '').trim();
+                                      if (addr.isEmpty) return;
+                                      await Clipboard.setData(ClipboardData(text: addr));
+                                      if (ctx.mounted) {
+                                        Fluttertoast.showToast(
+                                          msg: 'Address copied',
+                                          backgroundColor: Colors.green,
+                                          textColor: Colors.white,
+                                        );
+                                      }
+                                    },
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: c.accentBlue.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.copy, color: c.accentBlue, size: 16),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Copy',
+                                            style: TextStyle(color: c.accentBlue, fontSize: 12, fontWeight: FontWeight.bold),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -1376,7 +1417,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                           valueListenable: expiresAtNotifier,
                           builder: (context, expiresAt, _) {
                             final remaining = expiresAt.difference(DateTime.now());
-                            final seconds = remaining.inSeconds.clamp(0, 300);
+                            final seconds = remaining.inSeconds.clamp(0, 600);
                             final minutes = seconds ~/ 60;
                             final secs = seconds % 60;
                             final isExpired = seconds <= 0;
