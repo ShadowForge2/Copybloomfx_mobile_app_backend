@@ -1209,6 +1209,8 @@ class _FinanceScreenState extends State<FinanceScreen> {
     ValueNotifier<DateTime> expiresAtNotifier = ValueNotifier(fixedExpiry);
     ValueNotifier<String> statusNotifier = ValueNotifier('pending');
     ValueNotifier<bool> approvedNotifier = ValueNotifier(false);
+    ValueNotifier<bool> confirmedNotifier = ValueNotifier(false);
+    ValueNotifier<bool> confirmingNotifier = ValueNotifier(false);
     Timer? countdownTimer;
     Timer? pollTimer;
 
@@ -1231,7 +1233,11 @@ class _FinanceScreenState extends State<FinanceScreen> {
           final res = await apiService.getDepositStatus(dep.id);
           if (res.success && res.data != null) {
             final status = res.data!['status']?.toString() ?? 'pending';
+            final paymentStatus = res.data!['paymentStatus']?.toString();
             statusNotifier.value = status;
+            if (paymentStatus == 'paid') {
+              confirmedNotifier.value = true;
+            }
             if (status == 'approved') {
               approvedNotifier.value = true;
               pollTimer?.cancel();
@@ -1472,19 +1478,95 @@ class _FinanceScreenState extends State<FinanceScreen> {
                             ),
                           )
                         else
-                          Row(
-                            children: [
-                              const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Checking for approval...',
-                                style: TextStyle(color: c.textSecondary, fontSize: 12),
-                              ),
-                            ],
+                          ValueListenableBuilder<bool>(
+                            valueListenable: confirmedNotifier,
+                            builder: (context, confirmed, _) {
+                              if (confirmed) {
+                                return Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withValues(alpha: 0.10),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.green),
+                                  ),
+                                  child: const Row(
+                                    children: [
+                                      Icon(Icons.verified_user, color: Colors.green, size: 18),
+                                      SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Payment confirmed — awaiting admin verification. Your deposit will be credited once verified.',
+                                          style: TextStyle(color: Colors.green, fontSize: 12),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  ValueListenableBuilder<bool>(
+                                    valueListenable: confirmingNotifier,
+                                    builder: (context, confirming, _) {
+                                      return ElevatedButton.icon(
+                                        onPressed: confirming
+                                            ? null
+                                            : () async {
+                                                confirmingNotifier.value = true;
+                                                final ok = await dash.confirmDepositPayment(dep.id);
+                                                confirmingNotifier.value = false;
+                                                if (!context.mounted) return;
+                                                if (ok) {
+                                                  confirmedNotifier.value = true;
+                                                  Fluttertoast.showToast(
+                                                    msg: 'Payment marked as sent — ready for verification',
+                                                    backgroundColor: Colors.green,
+                                                    textColor: Colors.white,
+                                                  );
+                                                } else {
+                                                  Fluttertoast.showToast(
+                                                    msg: dash.errorMessage ?? 'Failed to confirm payment',
+                                                    backgroundColor: Colors.red,
+                                                    textColor: Colors.white,
+                                                  );
+                                                }
+                                              },
+                                        icon: confirming
+                                            ? const SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                              )
+                                            : const Icon(Icons.check, size: 18),
+                                        label: Text(confirming ? 'Sending...' : 'I Have Made Payment'),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFF2E7D32),
+                                          foregroundColor: Colors.white,
+                                          minimumSize: const Size(0, 44),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Row(
+                                    children: [
+                                      const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Checking for approval...',
+                                        style: TextStyle(color: c.textSecondary, fontSize: 12),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              );
+                            },
                           ),
                       ],
                     ),

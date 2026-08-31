@@ -19,6 +19,7 @@ import {
   approvedLockExpiresAt,
   processUserDepositsExpiry,
   resolveReferrerUserId,
+  PAYMENT_CONFIRMED,
 } from '../services/depositExpiry.js';
 import { NETWORKS, pickAvailableWallet, bindAssignment, getAssignment, releaseAssignment } from '../utils/wallets.js';
 import { paystackInit, paystackVerify, convertNGNtoUSD } from '../utils/paystack.js';
@@ -240,6 +241,7 @@ router.get('/dashboard', async (req, res) => {
         walletAddress: d.wallet_address, status: d.status,
         createdAt: d.created_at, expiresAt: d.expires_at,
         walletExpiresAt: d.wallet_expires_at || (d.created_at ? walletAssignmentExpiresAt(d.created_at) : null),
+        paymentStatus: d.reference || null,
       })),
       canClaimDaily, dailyRewardAmount: DAILY_REWARD_AMOUNT,
       ranks: ranks.map((r) => ({ id: r.id, name: r.name, minBalance: toNum(r.min_balance), maxBalance: rankMax(r), dailyProfitPct: toNum(r.daily_profit_pct), copyTradesLimit: r.copy_trades_limit, color: r.color, isCurrent: r.id === currentRankId })),
@@ -306,7 +308,7 @@ router.get('/finance', async (req, res) => {
     res.json({
       profile: profileToJson(profile, rank),
       overview: { totalDeposits, pendingDeposits, totalWithdrawals, referralBonuses: referralBonus, dailyRewards },
-      deposits: deposits.map((d) => ({ id: d.id, amount: toNum(d.amount), network: d.network, walletAddress: d.wallet_address, status: d.status, createdAt: d.created_at, expiresAt: d.expires_at })),
+      deposits: deposits.map((d) => ({ id: d.id, amount: toNum(d.amount), network: d.network, walletAddress: d.wallet_address, status: d.status, createdAt: d.created_at, expiresAt: d.expires_at, paymentStatus: d.reference || null })),
       withdrawals: withdrawals.map((w) => ({ id: w.id, amount: toNum(w.amount), network: w.network, walletAddress: w.wallet_address, status: w.status, createdAt: w.created_at })),
       networks: NETWORKS, minDeposit: MIN_DEPOSIT, minWithdrawal: MIN_WITHDRAWAL,
     });
@@ -743,10 +745,44 @@ router.get('/deposits/:id/status', async (req, res) => {
     res.json({
       id: d.id,
       status: d.status,
+      paymentStatus: d.reference || null,
       createdAt: d.created_at,
       expiresAt: d.expires_at,
       walletExpiresAt,
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** User confirms they sent payment to the generated wallet address → READY TO VERIFY for admin. */
+router.post('/deposits/:id/confirm', async (req, res) => {
+  try {
+    const d = await getDeposit(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Deposit not found' });
+    if (d.user_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+    if (d.status !== 'pending') return res.status(400).json({ error: 'Deposit is not pending' });
+    if (d.network === 'MaxelPay') return res.status(400).json({ error: 'Not a wallet address deposit' });
+
+    if (d.reference !== PAYMENT_CONFIRMED) {
+      await updateDeposit(d.id, { reference: PAYMENT_CONFIRMED });
+
+      createAuditLog({
+        user_id: req.user.id, action: 'deposit.confirm_payment', entity_type: 'deposit', entity_id: d.id,
+        description: `User confirmed they paid $${toNum(d.amount)} ${d.network || 'crypto'} deposit`,
+        metadata: JSON.stringify({ amount: toNum(d.amount), network: d.network }),
+        ip_address: req.ip || req.connection.remoteAddress || '',
+      }).catch(() => {});
+
+      createNotification(
+        req.user.id,
+        'Payment Received',
+        'Thanks! Your payment is now flagged as ready to verify. We\u2019ll credit your tradable balance once confirmed.',
+        'info',
+      ).catch(() => {});
+    }
+
+    res.json({ ok: true, id: d.id, status: 'pending', paymentStatus: PAYMENT_CONFIRMED });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

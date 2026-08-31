@@ -179,6 +179,9 @@ class PendingDeposit {
   final DateTime? walletExpiresAt;
   final String? walletAddress;
   final String status;
+  /// 'paid' = user tapped "I have made payment" (ready to verify);
+  /// 'timeout' = wallet window lapsed without confirmation.
+  final String? paymentStatus;
 
   PendingDeposit({
     required this.id,
@@ -189,7 +192,10 @@ class PendingDeposit {
     this.walletExpiresAt,
     this.walletAddress,
     this.status = 'pending',
+    this.paymentStatus,
   });
+
+  bool get isPaymentConfirmed => paymentStatus == 'paid';
 
   factory PendingDeposit.fromJson(Map<String, dynamic> json) {
     return PendingDeposit(
@@ -207,6 +213,7 @@ class PendingDeposit {
           : null,
       walletAddress: json['walletAddress']?.toString(),
       status: json['status']?.toString() ?? 'pending',
+      paymentStatus: json['paymentStatus']?.toString(),
     );
   }
 
@@ -888,6 +895,28 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
     } finally {
       _isSubmittingDeposit = false;
       notifyListeners();
+    }
+  }
+
+  /// User taps "I have made payment" — flags the deposit as ready to verify for admin.
+  Future<bool> confirmDepositPayment(String depositId) async {
+    try {
+      if (_useLocalOnly) {
+        return true;
+      }
+      final token = await AuthService.getToken();
+      final api = ApiService(baseUrl: _apiService.baseUrl, authToken: token);
+      final res = await api.confirmDepositPayment(depositId);
+      if (res.success) {
+        fetchDashboardData(userId: _userId, showLoading: false);
+        fetchFinance();
+        return true;
+      }
+      _errorMessage = res.message;
+      return false;
+    } catch (_) {
+      _errorMessage = 'Failed to confirm payment. Please try again.';
+      return false;
     }
   }
 

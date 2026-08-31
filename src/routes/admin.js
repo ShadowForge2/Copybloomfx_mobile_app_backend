@@ -109,8 +109,9 @@ router.get('/dashboard', async (req, res) => {
 
 router.get('/deposits', async (req, res) => {
   try {
-    // Auto-mark crypto pending deposits whose wallet payment window lapsed as
-    // expired (payment timeout, user's fault) so the admin sees them clearly.
+    // Flag crypto pending deposits whose wallet payment window lapsed as timed
+    // out (user's fault) so the admin sees them clearly. They STAY pending so
+    // the admin can still approve a late real payment.
     await withFallback(processAllCryptoWalletExpiry(), 0);
     const where = {};
     if (req.query.status) where.status = req.query.status;
@@ -132,6 +133,7 @@ router.get('/deposits', async (req, res) => {
         network: d.network, walletAddress: d.wallet_address, status: d.status,
         createdAt: d.created_at, expiresAt: d.expires_at,
         walletExpiresAt: d.created_at ? walletAssignmentExpiresAt(d.created_at) : null,
+        paymentStatus: d.reference || null,
         referrerId: d.referrer_id,
         user: user ? { id: user.id, username: user.username, email: user.email, isFlagged: user.is_flagged, isBanned: user.is_banned } : null,
       };

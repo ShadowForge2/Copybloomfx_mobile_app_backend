@@ -1,6 +1,10 @@
 /**
  * Deposit lifecycle:
- * - Crypto pending: stays pending until admin approves/rejects (no auto-expire).
+ * - Crypto pending: stays pending until admin approves/rejects. If the wallet
+ *   payment window lapses without the user confirming payment, the deposit is
+ *   kept pending but flagged as timed out (reference='timeout') so the admin
+ *   can still approve a late real payment. If the user taps "I have made
+ *   payment", it is flagged ready (reference='paid').
  * - Paystack: auto-approved on verify (not pending).
  * - Approved rows (crypto, promo, referral, Paystack): 30-day lock then principal consumed.
  */
@@ -33,16 +37,35 @@ export function approvedLockExpiresAt(approvedAt = new Date()) {
 const MAXELPAY_PENDING_MINUTES = 15; /** auto-reject MaxelPay pending after 15 min — user has 15 min to complete payment */
 
 /**
- * A crypto pending deposit is a payment timeout when the user hasn't paid into
- * the generated wallet address before the wallet assignment window lapses.
- * This is the user's fault (they didn't complete payment in time), so the
- * deposit is auto-expired without requiring admin review.
+ * Payment-status flags stored in the deposit `reference` column (only for
+ * crypto pending deposits — Paystack/MaxelPay/Card use it for real refs).
  */
+export const PAYMENT_CONFIRMED = 'paid';
+export const PAYMENT_TIMEOUT = 'timeout';
+
+/** Is the user past the wallet payment window without confirming payment? */
 export function isCryptoWalletExpired(deposit, now = new Date()) {
   if (deposit.status !== 'pending') return false;
   if (deposit.network === 'MaxelPay') return false; // own 15-min window below
   if (!deposit.created_at) return false;
   return walletAssignmentExpiresAt(deposit.created_at) < now;
+}
+
+export function isPaymentConfirmed(deposit) {
+  return deposit.reference === PAYMENT_CONFIRMED;
+}
+
+/**
+ * The wallet payment window lapsed and the user never confirmed payment.
+ * The deposit STAYS pending (so the admin can still approve a late real
+ * payment) but is flagged as timed out so the admin sees it clearly.
+ * Never downgrades a deposit the user already flagged as paid.
+ */
+export async function markCryptoWalletTimeout(deposit) {
+  if (!isCryptoWalletExpired(deposit)) return false;
+  if (isPaymentConfirmed(deposit) || deposit.reference === PAYMENT_TIMEOUT) return false;
+  const updated = await updateDepositIfStatus(deposit.id, 'pending', { reference: PAYMENT_TIMEOUT }).catch(() => null);
+  return !!updated;
 }
 
 export function isApprovedLockExpired(deposit, now = new Date()) {
@@ -145,25 +168,26 @@ export async function processUserDepositsExpiry(userId, ip = '') {
         rejectedCount++;
       }
     }
-    // Crypto pending: wallet payment window lapsed → auto payment timeout (user's fault).
-    if (isCryptoWalletExpired(d, now)) {
-      await updateDepositIfStatus(d.id, 'pending', { status: 'expired' }).catch(() => {});
+    // Crypto pending: wallet payment window lapsed → flag as timed out (user's
+    // fault) but keep pending so the admin can still approve a late payment.
+    if (isCryptoWalletExpired(d, now) && !isPaymentConfirmed(d)) {
       expiredCount++;
     }
+    await markCryptoWalletTimeout(d);
   }
   return { pendingCount: 0, approvedCount, rejectedCount, expiredCount };
 }
 
-/** Auto-expire any crypto pending deposit whose wallet payment window has lapsed (admin/global pass). */
+/** Flag any crypto pending deposit whose wallet payment window lapsed (admin/global pass). */
 export async function processAllCryptoWalletExpiry() {
   const pending = await getDeposits({ status: 'pending' }).catch(() => []);
   const now = new Date();
   let expiredCount = 0;
   for (const d of pending) {
-    if (isCryptoWalletExpired(d, now)) {
-      await updateDepositIfStatus(d.id, 'pending', { status: 'expired' }).catch(() => {});
+    if (isCryptoWalletExpired(d, now) && !isPaymentConfirmed(d)) {
       expiredCount++;
     }
+    await markCryptoWalletTimeout(d);
   }
   return expiredCount;
 }

@@ -592,14 +592,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  /// Only show the payment banner while the generated wallet address is still
-  /// valid (within the wallet window). Once the address expires, hide the banner
-  /// so it isn't shown forever, but the pending deposit itself stays on the
-  /// backend for admin review and approval.
+  /// Show the payment banner while the generated wallet address is still
+  /// valid (within the wallet window), OR forever once the user has confirmed
+  /// they made payment (kept until admin approves/rejects). If the window
+  /// lapsed without confirmation, hide the banner like the deposit expired
+  /// (the backend keeps it pending with a timeout flag for admin review).
   List<PendingDeposit> _activePendingBanners(DashboardData? data) {
     final deposits = data?.pendingDeposits ?? const <PendingDeposit>[];
     final now = DateTime.now();
     return deposits.where((d) {
+      if (d.isPaymentConfirmed) return true;
       final expires = d.walletExpiresAt ?? d.expiresAt;
       if (expires == null) return true;
       return expires.isAfter(now);
@@ -607,6 +609,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   String _walletTimeRemaining(PendingDeposit d) {
+    if (d.isPaymentConfirmed) return 'Ready to verify — awaiting admin approval';
     final expires = d.walletExpiresAt ?? d.expiresAt;
     if (expires == null) return 'Awaiting admin approval';
     final now = DateTime.now();
@@ -619,26 +622,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildPendingDepositBanner(PendingDeposit deposit, AppColors c) {
     final timeRemaining = _walletTimeRemaining(deposit);
+    final confirmed = deposit.isPaymentConfirmed;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
+        color: confirmed ? const Color(0xFFE8F5E9) : const Color(0xFFFFF8E1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFFFC107)),
+        border: Border.all(color: confirmed ? const Color(0xFF4CAF50) : const Color(0xFFFFC107)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.warning, color: Color(0xFFFF6F00), size: 20),
+              Icon(confirmed ? Icons.check_circle : Icons.warning, color: confirmed ? const Color(0xFF2E7D32) : const Color(0xFFFF6F00), size: 20),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Pending Deposit',
+                  confirmed ? 'Ready to Verify' : 'Pending Deposit',
                   style: TextStyle(
-                    color: Color(0xFFE65100),
+                    color: confirmed ? const Color(0xFF1E5E20) : const Color(0xFFE65100),
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -704,9 +708,68 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ],
+          if (confirmed) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF4CAF50).withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF4CAF50)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.verified_user, color: Color(0xFF2E7D32), size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Payment confirmed — awaiting admin verification. Your deposit will be credited once verified.',
+                      style: TextStyle(color: Color(0xFF1B5E20), fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _confirmPayment(deposit),
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text('I Have Made Payment'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(0, 40),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  Future<void> _confirmPayment(PendingDeposit deposit) async {
+    final provider = Provider.of<DashboardProvider>(context, listen: false);
+    final confirmed = await provider.confirmDepositPayment(deposit.id);
+    if (!mounted) return;
+    if (confirmed) {
+      Fluttertoast.showToast(
+        msg: 'Payment marked as sent — ready for verification',
+        backgroundColor: Colors.green,
+        textColor: Colors.white,
+      );
+    } else {
+      Fluttertoast.showToast(
+        msg: provider.errorMessage ?? 'Failed to confirm payment',
+        backgroundColor: Colors.red,
+        textColor: Colors.white,
+      );
+    }
   }
 
   Widget _buildBalancesSection(DashboardData? dashboardData, AppColors c) {

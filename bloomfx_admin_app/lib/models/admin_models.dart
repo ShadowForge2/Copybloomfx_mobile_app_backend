@@ -13,6 +13,9 @@ class AdminDeposit {
   final bool isFlagged;
   final bool isBanned;
   final String? referrerCode;
+  /// 'paid' = user tapped "I have made payment" (ready to verify);
+  /// 'timeout' = wallet window lapsed without confirmation (still approvable).
+  final String? paymentStatus;
 
   AdminDeposit({
     required this.id,
@@ -29,11 +32,15 @@ class AdminDeposit {
     this.isFlagged = false,
     this.isBanned = false,
     this.referrerCode,
+    this.paymentStatus,
   });
 
-  /// Crypto deposit whose wallet payment window lapsed without payment.
-  /// Auto-expired by the backend — the user's fault, no admin action needed.
-  bool get isPaymentTimeout => status == 'expired';
+  /// User tapped "I have made payment" — admin should verify promptly.
+  bool get isReadyToVerify => paymentStatus == 'paid';
+
+  /// Wallet payment window lapsed without the user confirming. Still pending,
+  /// so the admin CAN approve if payment actually arrived (late).
+  bool get isWalletTimeout => status == 'pending' && paymentStatus == 'timeout';
 
   factory AdminDeposit.fromJson(Map<String, dynamic> json) {
     final user = json['user'] as Map<String, dynamic>?;
@@ -54,6 +61,7 @@ class AdminDeposit {
       isFlagged: user?['isFlagged'] as bool? ?? json['isFlagged'] as bool? ?? false,
       isBanned: user?['isBanned'] as bool? ?? json['isBanned'] as bool? ?? false,
       referrerCode: json['referrerCode']?.toString(),
+      paymentStatus: json['paymentStatus']?.toString(),
     );
   }
 
@@ -73,6 +81,7 @@ class AdminDeposit {
       isFlagged: isFlagged,
       isBanned: isBanned,
       referrerCode: referrerCode,
+      paymentStatus: paymentStatus,
     );
   }
 }
