@@ -144,10 +144,6 @@ const MIN_WITHDRAWAL = 1.5;
 const DAILY_REWARD_AMOUNT = 0.1;
 const PAIRS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'DOGE/USDT', 'ADA/USDT', 'AVAX/USDT'];
 
-function refereeHasApprovedDeposit(deposits) {
-  return deposits.some((d) => d.status === 'approved' && d.network !== 'Referral Bonus');
-}
-
 async function updateUserRank(userId, preFetchedProfile = null, preFetchedRanks = null) {
   const profile = preFetchedProfile || await getProfile(userId);
   if (!profile) return null;
@@ -190,6 +186,8 @@ function profileToJson(p, rank) {
     validReferrals: p?.valid_referrals ?? 0,
     referralEarnings: toNum(p?.referral_earnings),
     profilePicture: p?.profile_picture || null,
+    firstName: p?.first_name || null,
+    lastName: p?.last_name || null,
     lastDailyRewardAt: p?.last_daily_reward_at || null,
     lastDailyProfitAt: p?.last_daily_profit_at || null,
     rank: rank ? {
@@ -206,7 +204,7 @@ router.get('/me', async (req, res) => {
     const profile = await getProfile(req.user.id);
     const rank = profile ? await getRank(profile.rank_id) : null;
     res.json({
-      user: { id: req.user.id, username: req.user.username, email: req.user.email, role: req.user.role, isFlagged: req.user.is_flagged, isBanned: req.user.is_banned },
+      user: { id: req.user.id, username: req.user.username, email: req.user.email, role: req.user.role, isFlagged: req.user.is_flagged, isBanned: req.user.is_banned, firstName: profile?.first_name || null, lastName: profile?.last_name || null },
       profile: profileToJson(profile, rank),
     });
   } catch (e) {
@@ -216,16 +214,23 @@ router.get('/me', async (req, res) => {
 
 router.put('/profile', async (req, res) => {
   try {
-    const { profilePicture, email } = req.body;
+    const { profilePicture, profile_picture, email, firstName, lastName, first_name, last_name, avatarUrl, avatar_url } = req.body;
     const profile = await getProfile(req.user.id);
     if (!profile) return res.status(404).json({ error: 'Profile not found' });
     const updates = {};
     if (profilePicture != null) updates.profile_picture = String(profilePicture).slice(0, 100000);
+    if (profile_picture != null) updates.profile_picture = String(profile_picture).slice(0, 100000);
+    if (avatarUrl != null) updates.avatar_url = String(avatarUrl).slice(0, 100000);
+    if (avatar_url != null) updates.avatar_url = String(avatar_url).slice(0, 100000);
+    if (firstName != null) updates.first_name = String(firstName).trim().slice(0, 100);
+    if (lastName != null) updates.last_name = String(lastName).trim().slice(0, 100);
+    if (first_name != null) updates.first_name = String(first_name).trim().slice(0, 100);
+    if (last_name != null) updates.last_name = String(last_name).trim().slice(0, 100);
     if (Object.keys(updates).length) await updateProfile(req.user.id, updates);
     if (email != null && email.trim()) await updateProfile(req.user.id, { email: email.trim() });
     const updated = await getProfile(req.user.id);
     const rank = updated ? await getRank(updated.rank_id) : null;
-    res.json({ profile: profileToJson(updated, rank), user: { id: req.user.id, username: req.user.username, email: req.user.email } });
+    res.json({ profile: profileToJson(updated, rank), user: { id: req.user.id, username: req.user.username, email: req.user.email, firstName: updated?.first_name || null, lastName: updated?.last_name || null } });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -653,13 +658,16 @@ router.get('/referral', async (req, res) => {
 
     const referrals = await Promise.all(refereeProfiles.map(async (p) => {
       const referee = await getUser(p.user_id).catch(() => null);
-      const deposits = await getDeposits({ user_id: p.user_id });
       const commissionRows = await getReferrals({
         referrer_id: req.user.id,
         referee_id: p.user_id,
       });
       const totalCommission = commissionRows.reduce((s, r) => s + toNum(r.bonus_amount), 0);
-      const isValid = refereeHasApprovedDeposit(deposits);
+      // A referral counts as VALID permanently once the referee's deposit was
+      // ever made and commission paid (idempotent per deposit). It must NOT
+      // revert to PENDING when that approved deposit later hits its 30-day
+      // expiry/normal lifecycle.
+      const isValid = commissionRows.length > 0;
       return {
         userId: p.user_id,
         username: referee?.username ?? 'Unknown',

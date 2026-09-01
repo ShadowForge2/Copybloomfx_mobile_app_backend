@@ -133,6 +133,8 @@ router.post('/signup', async (req, res) => {
         email: user.email,
         role: user.role,
         isFlagged: user.is_flagged,
+        firstName: profile?.first_name || null,
+        lastName: profile?.last_name || null,
         profile: profileResponse(profile, rank),
       },
     });
@@ -277,6 +279,8 @@ router.post('/login', async (req, res) => {
         email: user.email,
         role: user.role,
         isFlagged: user.is_flagged,
+        firstName: profile?.first_name || null,
+        lastName: profile?.last_name || null,
         profile: profileResponse(profile, rank),
       },
     });
