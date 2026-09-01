@@ -35,9 +35,11 @@ router.post('/maxelpay/webhook', async (req, res) => {
     }
 
     const { event, data } = req.body;
-    // We only honor decisive completion events. Partial payments are NOT a
+    // We only honor decisive terminal events. Partial payments are NOT a
     // completed deposit (exact amount is required to be credited).
-    if (event !== 'payment.completed' && event !== 'payment.overpaid') {
+    const TERMINAL_PAID_EVENTS = ['payment.completed', 'payment.overpaid'];
+    const TERMINAL_CANCEL_EVENTS = ['payment.expired', 'payment.cancelled', 'payment.canceled', 'payment.failed', 'payment.timeout'];
+    if (!TERMINAL_PAID_EVENTS.includes(event) && !TERMINAL_CANCEL_EVENTS.includes(event)) {
       return res.status(200).json({ received: true, status: 'ignored' });
     }
 
@@ -52,6 +54,20 @@ router.post('/maxelpay/webhook', async (req, res) => {
 
     const deposit = deposits[0];
     if (deposit.status !== 'pending') return res.status(200).json({ received: true, status: 'already_processed' });
+
+    // MaxelPay closed the session without payment (expired/cancelled/failed):
+    // reject immediately so the pending banner disappears right away.
+    if (TERMINAL_CANCEL_EVENTS.includes(event)) {
+      await updateDeposit(deposit.id, { status: 'rejected' }).catch(() => {});
+      createNotification(deposit.user_id, 'Deposit Expired', 'Your deposit session expired and was closed. No payment was received.', 'info').catch(() => {});
+      createAuditLog({
+        user_id: deposit.user_id, action: 'deposit.reject_expired', entity_type: 'deposit', entity_id: deposit.id,
+        description: `MaxelPay ${event} — deposit auto-rejected`,
+        metadata: JSON.stringify({ event, reference }),
+        ip_address: req.ip || req.connection.remoteAddress || '',
+      }).catch(() => {});
+      return res.status(200).json({ received: true, status: 'rejected' });
+    }
 
     const paidAmount = toNum(data.totalPaidUsd || data.paidAmount || data.amount || deposit.amount);
     const expectedAmount = toNum(deposit.amount);
