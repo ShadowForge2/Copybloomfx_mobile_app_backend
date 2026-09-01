@@ -182,6 +182,9 @@ class PendingDeposit {
   /// 'paid' = user tapped "I have made payment" (ready to verify);
   /// 'timeout' = wallet window lapsed without confirmation.
   final String? paymentStatus;
+  /// True when the user tapped "Having a problem?" — the deposit was sent to
+  /// the admin for manual review.
+  final bool issueReported;
 
   PendingDeposit({
     required this.id,
@@ -193,6 +196,7 @@ class PendingDeposit {
     this.walletAddress,
     this.status = 'pending',
     this.paymentStatus,
+    this.issueReported = false,
   });
 
   bool get isPaymentConfirmed => paymentStatus == 'paid';
@@ -214,6 +218,7 @@ class PendingDeposit {
       walletAddress: json['walletAddress']?.toString(),
       status: json['status']?.toString() ?? 'pending',
       paymentStatus: json['paymentStatus']?.toString(),
+      issueReported: json['issueReported'] == true,
     );
   }
 
@@ -798,13 +803,15 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// COPY BLOOM `POST /deposits` — pending until admin approves (no locked credit yet).
+  /// COPY BLOOM `POST /deposits` — routes through MaxelPay; returns a checkout
+  /// URL to open. The deposit stays pending until MaxelPay confirms (auto
+  /// approved/rejected) or the user reports an issue for admin review.
   bool get isSubmittingDeposit => _isSubmittingDeposit;
   bool get isSubmittingPaystackDeposit => _isSubmittingPaystackDeposit;
 
   Future<UserDeposit?> submitDeposit({
     required double amount,
-    required String network,
+    String network = 'MaxelPay',
   }) async {
     if (_isSubmittingDeposit) return null;
     _isSubmittingDeposit = true;
@@ -815,15 +822,10 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
         _errorMessage = 'Minimum deposit is \$$MIN_DEPOSIT';
         return null;
       }
-      if (!InvestmentLogic.depositNetworks.contains(network)) {
-        _errorMessage = 'Invalid network';
-        return null;
-      }
 
       if (_useLocalOnly) {
         _localDepositSeq += 1;
         final id = 'ld$_localDepositSeq';
-        final wallet = InvestmentLogic.mockWalletForNetwork(network);
         final exp = DateTime.now().add(
           Duration(days: InvestmentLogic.lockDays),
         );
@@ -831,7 +833,6 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
           id: id,
           amount: amount,
           network: network,
-          walletAddress: wallet,
           status: 'pending',
           createdAt: DateTime.now(),
           expiresAt: exp,
@@ -846,7 +847,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       final token = await AuthService.getToken();
       final api = ApiService(baseUrl: _apiService.baseUrl, authToken: token);
-      final res = await api.postUserDeposit(amount: amount, network: network);
+      final res = await api.postUserDeposit(amount: amount);
       if (res.success && res.data != null) {
         final m = res.data!;
         final dep = UserDeposit(
@@ -864,6 +865,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
           walletExpiresAt: m['walletExpiresAt'] != null
               ? DateTime.tryParse(m['walletExpiresAt'].toString())
               : null,
+          checkoutUrl: m['checkoutUrl']?.toString(),
         );
         final currentFinance = _financeData;
         if (currentFinance != null) {
@@ -898,15 +900,15 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// User taps "I have made payment" — flags the deposit as ready to verify for admin.
-  Future<bool> confirmDepositPayment(String depositId) async {
+  /// User taps "Having a problem?" — flags the deposit for admin manual review.
+  Future<bool> reportDepositIssue(String depositId) async {
     try {
       if (_useLocalOnly) {
         return true;
       }
       final token = await AuthService.getToken();
       final api = ApiService(baseUrl: _apiService.baseUrl, authToken: token);
-      final res = await api.confirmDepositPayment(depositId);
+      final res = await api.reportDepositIssue(depositId);
       if (res.success) {
         fetchDashboardData(userId: _userId, showLoading: false);
         fetchFinance();
@@ -915,7 +917,7 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
       _errorMessage = res.message;
       return false;
     } catch (_) {
-      _errorMessage = 'Failed to confirm payment. Please try again.';
+      _errorMessage = 'Failed to report the issue. Please try again.';
       return false;
     }
   }

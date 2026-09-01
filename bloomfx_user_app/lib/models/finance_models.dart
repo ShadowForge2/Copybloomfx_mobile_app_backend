@@ -13,6 +13,8 @@ class UserDeposit {
   /// Wallet address assignment countdown only (crypto pending); not deposit status.
   final DateTime? walletExpiresAt;
   final String? referrerCode;
+  /// MaxelPay checkout URL returned by the deposit endpoint (crypto deposits).
+  final String? checkoutUrl;
 
   const UserDeposit({
     required this.id,
@@ -24,6 +26,7 @@ class UserDeposit {
     this.expiresAt,
     this.walletExpiresAt,
     this.referrerCode,
+    this.checkoutUrl,
   });
 
   factory UserDeposit.fromJson(Map<String, dynamic> json) {
@@ -39,6 +42,7 @@ class UserDeposit {
           ? DateTime.tryParse(json['walletExpiresAt'].toString())
           : null,
       referrerCode: json['referrerCode']?.toString(),
+      checkoutUrl: json['checkoutUrl']?.toString(),
     );
   }
 
@@ -57,6 +61,7 @@ class UserDeposit {
       expiresAt: expiresAt ?? this.expiresAt,
       walletExpiresAt: walletExpiresAt ?? this.walletExpiresAt,
       referrerCode: referrerCode,
+      checkoutUrl: checkoutUrl,
     );
   }
 }

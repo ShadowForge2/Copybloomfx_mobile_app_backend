@@ -166,10 +166,10 @@ class ApiService {
   Future<ApiResponse> getUserFinance() => _get('/api/user/finance');
   Future<ApiResponse> getUserNotifications() => _get('/api/user/notifications');
   Future<ApiResponse> getDepositStatus(String id) => _get('/api/user/deposits/$id/status');
-  Future<ApiResponse> postUserDeposit({required double amount, required String network}) =>
-      _post('/api/user/deposits', body: {'amount': amount, 'network': network});
-  Future<ApiResponse> confirmDepositPayment(String id) =>
-      _post('/api/user/deposits/$id/confirm');
+  Future<ApiResponse> postUserDeposit({required double amount}) =>
+      _post('/api/user/deposits', body: {'amount': amount});
+  Future<ApiResponse> reportDepositIssue(String id) =>
+      _post('/api/user/deposits/$id/report-issue');
   Future<ApiResponse> postUserWithdrawal({required double amount, required String network, required String walletAddress}) =>
       _post('/api/user/withdrawals', body: {'amount': amount, 'network': network, 'walletAddress': walletAddress});
   Future<ApiResponse> postUserDailyReward() => _post('/api/user/daily-reward');

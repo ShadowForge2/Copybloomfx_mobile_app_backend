@@ -34,20 +34,16 @@ class AdminDepositProvider extends ChangeNotifier {
 
       final token = await AuthService.getToken();
       final api = ApiService(baseUrl: _apiService.baseUrl, authToken: token);
-      // 'ready' and 'timeout' are client-side views over pending deposits
-      // (derived from the paymentStatus flag), while others map to a status.
-      final statusParam = (_statusFilter == 'ready' || _statusFilter == 'timeout')
-          ? 'pending'
-          : (_statusFilter == 'all' ? null : _statusFilter);
+      // 'uploaded' = needs review: pending deposits (the backend already
+      // surfaces only issue-reported deposits as pending). Other filters map
+      // to the deposit status.
+      final statusParam = _statusFilter == 'all' || _statusFilter == 'uploaded'
+          ? (_statusFilter == 'all' ? null : 'pending')
+          : _statusFilter;
       final res = await api.getAdminDeposits(statusParam);
       if (res.success && res.data != null) {
         final list = res.data!['deposits'] as List<dynamic>?;
-        var loaded = list?.map((d) => AdminDeposit.fromJson(d as Map<String, dynamic>)).toList() ?? [];
-        if (_statusFilter == 'ready') {
-          loaded = loaded.where((d) => d.isReadyToVerify).toList();
-        } else if (_statusFilter == 'timeout') {
-          loaded = loaded.where((d) => d.isWalletTimeout).toList();
-        }
+        final loaded = list?.map((d) => AdminDeposit.fromJson(d as Map<String, dynamic>)).toList() ?? [];
         _deposits = loaded;
         _isLoading = false;
         notifyListeners();

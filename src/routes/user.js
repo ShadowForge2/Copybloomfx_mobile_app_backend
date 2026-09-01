@@ -15,13 +15,11 @@ import {
 import { authMiddleware } from '../middleware/auth.js';
 import { toNum, isSameDay, getMidnightWAT, normalizePromoCode, randomPromoBonus } from '../utils/helpers.js';
 import {
-  walletAssignmentExpiresAt,
   approvedLockExpiresAt,
   processUserDepositsExpiry,
   resolveReferrerUserId,
-  PAYMENT_CONFIRMED,
 } from '../services/depositExpiry.js';
-import { NETWORKS, pickAvailableWallet, bindAssignment, getAssignment, releaseAssignment } from '../utils/wallets.js';
+import { NETWORKS } from '../utils/wallets.js';
 import { paystackInit, paystackVerify, convertNGNtoUSD } from '../utils/paystack.js';
 import { createPaymentSession, verifyWebhookSignature } from '../utils/maxelpay.js';
 import { payReferralCommission } from '../services/referralCommission.js';
@@ -37,7 +35,9 @@ router.post('/maxelpay/webhook', async (req, res) => {
     }
 
     const { event, data } = req.body;
-    if (event !== 'payment.completed' && event !== 'payment.partial' && event !== 'payment.overpaid') {
+    // We only honor decisive completion events. Partial payments are NOT a
+    // completed deposit (exact amount is required to be credited).
+    if (event !== 'payment.completed' && event !== 'payment.overpaid') {
       return res.status(200).json({ received: true, status: 'ignored' });
     }
 
@@ -53,11 +53,26 @@ router.post('/maxelpay/webhook', async (req, res) => {
     const deposit = deposits[0];
     if (deposit.status !== 'pending') return res.status(200).json({ received: true, status: 'already_processed' });
 
-    const paidAmount = data.totalPaidUsd || data.paidAmount || data.amount || toNum(deposit.amount);
+    const paidAmount = toNum(data.totalPaidUsd || data.paidAmount || data.amount || deposit.amount);
+    const expectedAmount = toNum(deposit.amount);
+
+    // Exact-amount enforcement: only credit when the user sent at least the
+    // full required amount (overpayment is acceptable and credited at the
+    // expected amount). Sending less means MaxelPay collected it but the user
+    // is NOT credited — the deposit stays pending for manual review.
+    const amountMissing = paidAmount < expectedAmount - 0.01;
+    if (amountMissing) {
+      await updateDeposit(deposit.id, { wallet_address: 'issue_reported' }).catch(() => {});
+      res.status(200).json({ received: true, status: 'amount_mismatch' });
+      return;
+    }
+
     const approvedAt = new Date();
+    const creditAmount = expectedAmount;
 
     await updateDeposit(deposit.id, {
       status: 'approved',
+      reference: null,
       approved_at: approvedAt,
       expires_at: approvedLockExpiresAt(approvedAt),
     });
@@ -65,7 +80,7 @@ router.post('/maxelpay/webhook', async (req, res) => {
     const profile = await getProfile(deposit.user_id);
     if (profile) {
       await updateProfile(deposit.user_id, {
-        locked_balance: toNum(profile.locked_balance) + paidAmount,
+        locked_balance: toNum(profile.locked_balance) + creditAmount,
       });
     }
 
@@ -77,13 +92,13 @@ router.post('/maxelpay/webhook', async (req, res) => {
         referrerId,
         refereeId: deposit.user_id,
         depositId: deposit.id,
-        depositAmount: paidAmount,
+        depositAmount: creditAmount,
         walletNetwork: 'MaxelPay',
       });
       if (commission.paid) await updateUserRank(referrerId);
     }
 
-    createNotification(deposit.user_id, 'Deposit Approved', `Your MaxelPay deposit of $${paidAmount.toFixed(2)} has been confirmed and credited to your tradable balance.`, 'success').catch(() => {});
+    createNotification(deposit.user_id, 'Deposit Approved', `Your deposit of $${creditAmount.toFixed(2)} has been confirmed and credited to your tradable balance.`, 'success').catch(() => {});
 
     res.status(200).json({ received: true, status: 'success' });
   } catch (e) {
@@ -240,8 +255,8 @@ router.get('/dashboard', async (req, res) => {
         id: d.id, amount: toNum(d.amount), network: d.network,
         walletAddress: d.wallet_address, status: d.status,
         createdAt: d.created_at, expiresAt: d.expires_at,
-        walletExpiresAt: d.wallet_expires_at || (d.created_at ? walletAssignmentExpiresAt(d.created_at) : null),
         paymentStatus: d.reference || null,
+        issueReported: d.wallet_address === 'issue_reported',
       })),
       canClaimDaily, dailyRewardAmount: DAILY_REWARD_AMOUNT,
       ranks: ranks.map((r) => ({ id: r.id, name: r.name, minBalance: toNum(r.min_balance), maxBalance: rankMax(r), dailyProfitPct: toNum(r.daily_profit_pct), copyTradesLimit: r.copy_trades_limit, color: r.color, isCurrent: r.id === currentRankId })),
@@ -317,52 +332,65 @@ router.get('/finance', async (req, res) => {
   }
 });
 
+/**
+ * All crypto deposits now route through MaxelPay.
+ * The frontend sends { amount } (network is always 'MaxelPay').
+ * This creates a MaxelPay payment session and returns the checkout URL.
+ */
 router.post('/deposits', async (req, res) => {
   try {
-    const { amount, network, referrerCode } = req.body;
-    const amt = parseFloat(amount);
+    const amt = parseFloat(req.body.amount);
     if (isNaN(amt) || amt < MIN_DEPOSIT) return res.status(400).json({ error: `Minimum deposit $${MIN_DEPOSIT}` });
-    if (!NETWORKS.includes(network)) return res.status(400).json({ error: 'Invalid network' });
 
-    const wallet = pickAvailableWallet(network);
-    if (!wallet) return res.status(500).json({ error: 'No wallet available for this network' });
+    const profile = await getProfile(req.user.id);
+    if (!profile) return res.status(404).json({ error: 'Profile not found' });
 
-    const [refProfile, profile] = await Promise.all([
-      referrerCode ? getProfileByReferralCode(referrerCode.trim()) : Promise.resolve(null),
-      getProfile(req.user.id)
-    ]);
+    const orderId = `MP-${req.user.id}-${Date.now()}`;
+    const callbackUrl = `${req.protocol}://${req.get('host')}/api/user/maxelpay/webhook`;
+    const successUrl = `${req.protocol}://${req.get('host')}/api/user/maxelpay/success?orderId=${orderId}`;
+    const cancelUrl = `${req.protocol}://${req.get('host')}/api/user/maxelpay/cancel`;
 
-    let referrerId = null;
-    if (refProfile && refProfile.user_id !== req.user.id) {
-      referrerId = refProfile.user_id;
-    } else if (profile && profile.referred_by) {
-      referrerId = profile.referred_by;
+    const result = await createPaymentSession({
+      orderId,
+      amount: amt,
+      currency: 'USD',
+      description: `Deposit $${amt} to CPBloomFX`,
+      callbackUrl,
+      successUrl,
+      cancelUrl,
+      metadata: { userId: req.user.id },
+    });
+
+    if (!result.success || (!result.sessionId && !result.paymentUrl)) {
+      return res.status(502).json({ error: 'MaxelPay session creation failed' });
     }
 
-    const createdAt = new Date();
-    const d = await createDeposit({
-      user_id: req.user.id, amount: amt, network,
-      wallet_address: wallet,
-      expires_at: null,
+    const sessionId = result.sessionId || result.id;
+    const checkoutUrl = result.paymentUrl || result.checkoutUrl || result.url || result.checkout_url;
+
+    const referrerId = profile.referred_by || null;
+
+    const deposit = await createDeposit({
+      user_id: req.user.id, amount: amt, network: 'MaxelPay',
+      wallet_address: 'MaxelPay', status: 'pending',
+      reference: sessionId || orderId,
       referrer_id: referrerId,
     });
-    bindAssignment(d.id, wallet);
 
-    createNotification(req.user.id, 'Deposit Pending', `Your deposit of $${amt.toFixed(2)} is being verified and will be credited to your tradable balance once confirmed.`, 'info').catch(() => {});
+    createNotification(req.user.id, 'Deposit Pending', `Your deposit of $${amt.toFixed(2)} is pending payment confirmation. Please complete payment to proceed.`, 'info').catch(() => {});
 
     createAuditLog({
-      user_id: req.user.id, action: 'deposit.create', entity_type: 'deposit', entity_id: d.id,
-      description: `User created $${amt} deposit on ${network}`,
-      metadata: JSON.stringify({ amount: amt, network }),
+      user_id: req.user.id, action: 'deposit.create', entity_type: 'deposit', entity_id: deposit.id,
+      description: `User initiated $${amt} MaxelPay deposit`,
+      metadata: JSON.stringify({ amount: amt, orderId, sessionId }),
       ip_address: req.ip || req.connection.remoteAddress || '',
     }).catch(() => {});
 
-    const walletExpiresAt = walletAssignmentExpiresAt(createdAt);
     res.status(201).json({
-      id: d.id, amount: amt, network, walletAddress: wallet, status: 'pending',
-      createdAt: d.created_at,
-      expiresAt: null,
-      walletExpiresAt,
+      id: deposit.id, amount: amt, network: 'MaxelPay', status: 'pending',
+      checkoutUrl,
+      sessionId: sessionId || orderId,
+      createdAt: deposit.created_at,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -731,58 +759,51 @@ router.post('/paystack/verify', async (req, res) => {
   }
 });
 
-// Deposit status polling endpoint — called every 3s from Flutter deposit modal
+// Deposit status polling endpoint — called every few seconds from the app
 router.get('/deposits/:id/status', async (req, res) => {
   try {
     const d = await getDeposit(req.params.id);
     if (!d) return res.status(404).json({ error: 'Deposit not found' });
     if (d.user_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
-
-    const walletExpiresAt = d.created_at
-      ? walletAssignmentExpiresAt(d.created_at)
-      : null;
-
+    
     res.json({
       id: d.id,
       status: d.status,
       paymentStatus: d.reference || null,
       createdAt: d.created_at,
       expiresAt: d.expires_at,
-      walletExpiresAt,
+      issueReported: d.wallet_address === 'issue_reported',
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-/** User confirms they sent payment to the generated wallet address → READY TO VERIFY for admin. */
-router.post('/deposits/:id/confirm', async (req, res) => {
+/** User reports a problem with a pending deposit → admin sees it for manual review. */
+router.post('/deposits/:id/report-issue', async (req, res) => {
   try {
     const d = await getDeposit(req.params.id);
     if (!d) return res.status(404).json({ error: 'Deposit not found' });
     if (d.user_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     if (d.status !== 'pending') return res.status(400).json({ error: 'Deposit is not pending' });
-    if (d.network === 'MaxelPay') return res.status(400).json({ error: 'Not a wallet address deposit' });
 
-    if (d.reference !== PAYMENT_CONFIRMED) {
-      await updateDeposit(d.id, { reference: PAYMENT_CONFIRMED });
-
+    if (d.wallet_address !== 'issue_reported') {
+      await updateDeposit(d.id, { wallet_address: 'issue_reported' });
       createAuditLog({
-        user_id: req.user.id, action: 'deposit.confirm_payment', entity_type: 'deposit', entity_id: d.id,
-        description: `User confirmed they paid $${toNum(d.amount)} ${d.network || 'crypto'} deposit`,
+        user_id: req.user.id, action: 'deposit.report_issue', entity_type: 'deposit', entity_id: d.id,
+        description: `User reported a problem with $${toNum(d.amount)} ${d.network || 'crypto'} deposit`,
         metadata: JSON.stringify({ amount: toNum(d.amount), network: d.network }),
         ip_address: req.ip || req.connection.remoteAddress || '',
       }).catch(() => {});
-
       createNotification(
         req.user.id,
-        'Payment Received',
-        'Thanks! Your payment is now flagged as ready to verify. We\u2019ll credit your tradable balance once confirmed.',
+        'Issue Reported',
+        'Your deposit has been flagged for manual review. Our team will verify and process it shortly.',
         'info',
       ).catch(() => {});
     }
 
-    res.json({ ok: true, id: d.id, status: 'pending', paymentStatus: PAYMENT_CONFIRMED });
+    res.json({ ok: true, id: d.id, status: 'pending' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

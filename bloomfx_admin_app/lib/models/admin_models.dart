@@ -13,9 +13,9 @@ class AdminDeposit {
   final bool isFlagged;
   final bool isBanned;
   final String? referrerCode;
-  /// 'paid' = user tapped "I have made payment" (ready to verify);
-  /// 'timeout' = wallet window lapsed without confirmation (still approvable).
-  final String? paymentStatus;
+  /// True when the user tapped "Having a problem?" — this deposit needs the
+  /// admin's manual review (backend surfaces only these as pending).
+  final bool issueReported;
 
   AdminDeposit({
     required this.id,
@@ -32,15 +32,8 @@ class AdminDeposit {
     this.isFlagged = false,
     this.isBanned = false,
     this.referrerCode,
-    this.paymentStatus,
+    this.issueReported = false,
   });
-
-  /// User tapped "I have made payment" — admin should verify promptly.
-  bool get isReadyToVerify => paymentStatus == 'paid';
-
-  /// Wallet payment window lapsed without the user confirming. Still pending,
-  /// so the admin CAN approve if payment actually arrived (late).
-  bool get isWalletTimeout => status == 'pending' && paymentStatus == 'timeout';
 
   factory AdminDeposit.fromJson(Map<String, dynamic> json) {
     final user = json['user'] as Map<String, dynamic>?;
@@ -61,7 +54,7 @@ class AdminDeposit {
       isFlagged: user?['isFlagged'] as bool? ?? json['isFlagged'] as bool? ?? false,
       isBanned: user?['isBanned'] as bool? ?? json['isBanned'] as bool? ?? false,
       referrerCode: json['referrerCode']?.toString(),
-      paymentStatus: json['paymentStatus']?.toString(),
+      issueReported: json['walletAddress']?.toString() == 'issue_reported' || json['issueReported'] == true,
     );
   }
 
@@ -81,7 +74,7 @@ class AdminDeposit {
       isFlagged: isFlagged,
       isBanned: isBanned,
       referrerCode: referrerCode,
-      paymentStatus: paymentStatus,
+      issueReported: issueReported,
     );
   }
 }

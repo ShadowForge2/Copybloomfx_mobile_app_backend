@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
@@ -592,57 +591,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  /// Show the payment banner while the generated wallet address is still
-  /// valid (within the wallet window), OR forever once the user has confirmed
-  /// they made payment (kept until admin approves/rejects). If the window
-  /// lapsed without confirmation, hide the banner like the deposit expired
-  /// (the backend keeps it pending with a timeout flag for admin review).
+  /// Show the payment banner for every pending deposit while MaxelPay confirms
+  /// the payment. It disappears automatically once the deposit is approved or
+  /// rejected (MaxelPay response; or auto-rejected after the payment window).
+  /// If the user taps "Having a problem?" the deposit is flagged for the admin
+  /// to manually review and the banner stays until resolved.
   List<PendingDeposit> _activePendingBanners(DashboardData? data) {
     final deposits = data?.pendingDeposits ?? const <PendingDeposit>[];
-    final now = DateTime.now();
-    return deposits.where((d) {
-      if (d.isPaymentConfirmed) return true;
-      final expires = d.walletExpiresAt ?? d.expiresAt;
-      if (expires == null) return true;
-      return expires.isAfter(now);
-    }).toList();
-  }
-
-  String _walletTimeRemaining(PendingDeposit d) {
-    if (d.isPaymentConfirmed) return 'Ready to verify — awaiting admin approval';
-    final expires = d.walletExpiresAt ?? d.expiresAt;
-    if (expires == null) return 'Awaiting admin approval';
-    final now = DateTime.now();
-    if (expires.isBefore(now)) return 'Address expired';
-    final remaining = expires.difference(now);
-    final minutes = remaining.inMinutes;
-    final secs = remaining.inSeconds % 60;
-    return '${minutes}m ${secs}s left';
+    return deposits.where((d) => d.status == 'pending').toList();
   }
 
   Widget _buildPendingDepositBanner(PendingDeposit deposit, AppColors c) {
-    final timeRemaining = _walletTimeRemaining(deposit);
-    final confirmed = deposit.isPaymentConfirmed;
+    final reported = deposit.issueReported;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: confirmed ? const Color(0xFFE8F5E9) : const Color(0xFFFFF8E1),
+        color: reported ? const Color(0xFFE8F5E9) : const Color(0xFFFFF8E1),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: confirmed ? const Color(0xFF4CAF50) : const Color(0xFFFFC107)),
+        border: Border.all(color: reported ? const Color(0xFF4CAF50) : const Color(0xFFFFC107)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(confirmed ? Icons.check_circle : Icons.warning, color: confirmed ? const Color(0xFF2E7D32) : const Color(0xFFFF6F00), size: 20),
+              Icon(reported ? Icons.support_agent : Icons.schedule, color: reported ? const Color(0xFF2E7D32) : const Color(0xFFFF6F00), size: 20),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  confirmed ? 'Ready to Verify' : 'Pending Deposit',
+                  reported ? 'Under Review' : 'Awaiting Deposit',
                   style: TextStyle(
-                    color: confirmed ? const Color(0xFF1E5E20) : const Color(0xFFE65100),
+                    color: reported ? const Color(0xFF1E5E20) : const Color(0xFFE65100),
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -659,113 +639,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            '\$${deposit.amount.toStringAsFixed(2)} (${deposit.network}) — $timeRemaining',
+            'Awaiting deposit of \$${deposit.amount.toStringAsFixed(2)}. Your deposit will be credited automatically once payment is confirmed.',
             style: const TextStyle(color: Color(0xFF666666), fontSize: 12),
           ),
-          if (deposit.walletAddress != null && deposit.walletAddress!.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(
-                  child: SelectableText(
-                    deposit.walletAddress!,
-                    style: const TextStyle(color: Color(0xFF1565C0), fontSize: 11),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                InkWell(
-                  onTap: () async {
-                    final addr = deposit.walletAddress!.trim();
-                    await Clipboard.setData(ClipboardData(text: addr));
-                    if (mounted) {
-                      Fluttertoast.showToast(
-                        msg: 'Address copied',
-                        backgroundColor: Colors.green,
-                        textColor: Colors.white,
-                      );
-                    }
-                  },
-                  borderRadius: BorderRadius.circular(6),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: reported
+                ? Container(
+                    padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1565C0).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(6),
+                      color: const Color(0xFF4CAF50).withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF4CAF50)),
                     ),
                     child: const Row(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.copy, color: Color(0xFF1565C0), size: 16),
-                        SizedBox(width: 4),
-                        Text(
-                          'Copy',
-                          style: TextStyle(color: Color(0xFF1565C0), fontSize: 12, fontWeight: FontWeight.bold),
+                        Icon(Icons.verified_user, color: Color(0xFF2E7D32), size: 18),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Support is reviewing your deposit. You\u2019ll be notified once it\u2019s resolved.',
+                            style: TextStyle(color: Color(0xFF1B5E20), fontSize: 12),
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if (confirmed) ...[
-            const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF4CAF50).withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF4CAF50)),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.verified_user, color: Color(0xFF2E7D32), size: 18),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Payment confirmed — awaiting admin verification. Your deposit will be credited once verified.',
-                      style: TextStyle(color: Color(0xFF1B5E20), fontSize: 12),
+                  )
+                : ElevatedButton.icon(
+                    onPressed: () => _reportIssue(deposit),
+                    icon: const Icon(Icons.help_outline, size: 18),
+                    label: const Text('Having a problem?'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6F00),
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(0, 40),
                     ),
                   ),
-                ],
-              ),
-            ),
-          ] else
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => _confirmPayment(deposit),
-                  icon: const Icon(Icons.check, size: 18),
-                  label: const Text('I Have Made Payment'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2E7D32),
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(0, 40),
-                  ),
-                ),
-              ),
-            ),
+          ),
         ],
       ),
     );
   }
 
-  Future<void> _confirmPayment(PendingDeposit deposit) async {
+  Future<void> _reportIssue(PendingDeposit deposit) async {
     final provider = Provider.of<DashboardProvider>(context, listen: false);
-    final confirmed = await provider.confirmDepositPayment(deposit.id);
+    final ok = await provider.reportDepositIssue(deposit.id);
     if (!mounted) return;
-    if (confirmed) {
+    if (ok) {
       Fluttertoast.showToast(
-        msg: 'Payment marked as sent — ready for verification',
+        msg: 'Deposit flagged for review — support will check it',
         backgroundColor: Colors.green,
         textColor: Colors.white,
       );
+      provider.fetchDashboardData(showLoading: false);
     } else {
       Fluttertoast.showToast(
-        msg: provider.errorMessage ?? 'Failed to confirm payment',
+        msg: provider.errorMessage ?? 'Failed to report the issue',
         backgroundColor: Colors.red,
         textColor: Colors.white,
       );

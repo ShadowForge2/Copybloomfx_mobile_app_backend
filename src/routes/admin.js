@@ -14,8 +14,7 @@ import {
 } from '../config/data.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import { toNum, normalizePromoCode, roundMoney } from '../utils/helpers.js';
-import { releaseAssignment } from '../utils/wallets.js';
-import { approvedLockExpiresAt, processAllCryptoWalletExpiry, walletAssignmentExpiresAt } from '../services/depositExpiry.js';
+import { approvedLockExpiresAt } from '../services/depositExpiry.js';
 import { payReferralCommission } from '../services/referralCommission.js';
 
 const router = Router();
@@ -109,12 +108,17 @@ router.get('/dashboard', async (req, res) => {
 
 router.get('/deposits', async (req, res) => {
   try {
-    // Flag crypto pending deposits whose wallet payment window lapsed as timed
-    // out (user's fault) so the admin sees them clearly. They STAY pending so
-    // the admin can still approve a late real payment.
-    await withFallback(processAllCryptoWalletExpiry(), 0);
-    const where = {};
-    if (req.query.status) where.status = req.query.status;
+    // Pending deposits only surface for manual review when the user reported
+    // an issue (wallet_address='issue_reported'). Auto-approved MaxelPay
+    // deposits never reach the admin's pending list.
+    const { status } = req.query;
+    let where = {};
+    if (status) {
+      where.status = status;
+      if (status === 'pending') where.wallet_address = 'issue_reported';
+    } else {
+      where = {}; // all statuses, unfiltered
+    }
     const deposits = await withFallback(getDeposits(where), []);
 
     const userCache = new Map();
@@ -132,8 +136,6 @@ router.get('/deposits', async (req, res) => {
         id: d.id, userId: d.user_id, amount: toNum(d.amount),
         network: d.network, walletAddress: d.wallet_address, status: d.status,
         createdAt: d.created_at, expiresAt: d.expires_at,
-        walletExpiresAt: d.created_at ? walletAssignmentExpiresAt(d.created_at) : null,
-        paymentStatus: d.reference || null,
         referrerId: d.referrer_id,
         user: user ? { id: user.id, username: user.username, email: user.email, isFlagged: user.is_flagged, isBanned: user.is_banned } : null,
       };
@@ -164,7 +166,6 @@ router.post('/deposits/:id/approve', async (req, res) => {
     const approvedAt = new Date();
     const expiresAt = approvedLockExpiresAt(approvedAt);
     await updateDeposit(d.id, { status: 'approved', approved_at: approvedAt, expires_at: expiresAt });
-    releaseAssignment(d.id);
 
     if (d.referrer_id && d.referrer_id !== d.user_id) {
       await payReferralCommission({
@@ -200,7 +201,6 @@ router.post('/deposits/:id/reject', async (req, res) => {
     if (!d) return res.status(404).json({ error: 'Deposit not found' });
     if (d.status !== 'pending') return res.status(400).json({ error: 'Deposit not pending' });
     await updateDeposit(d.id, { status: 'rejected' });
-    releaseAssignment(d.id);
 
     createNotification(
       d.user_id,

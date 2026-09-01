@@ -32,9 +32,7 @@ class _AdminDepositsScreenState extends State<AdminDepositsScreen> {
                 children: [
                   _StatusChip(label: 'All', selected: provider.statusFilter == 'all', onTap: () => provider.setStatusFilter('all')),
                   const SizedBox(width: 8),
-                  _StatusChip(label: 'Ready', selected: provider.statusFilter == 'ready', onTap: () => provider.setStatusFilter('ready')),
-                  const SizedBox(width: 8),
-                  _StatusChip(label: 'Timeout', selected: provider.statusFilter == 'timeout', onTap: () => provider.setStatusFilter('timeout')),
+                  _StatusChip(label: 'Review', selected: provider.statusFilter == 'uploaded' || provider.statusFilter == 'review', onTap: () => provider.setStatusFilter('uploaded')),
                   const SizedBox(width: 8),
                   _StatusChip(label: 'Pending', selected: provider.statusFilter == 'pending', onTap: () => provider.setStatusFilter('pending')),
                   const SizedBox(width: 8),
@@ -106,12 +104,9 @@ class _DepositCard extends StatelessWidget {
     } else if (deposit.status == 'expired') {
       statusColor = Colors.grey;
       statusLabel = 'EXPIRED';
-    } else if (deposit.isReadyToVerify) {
+    } else if (deposit.status == 'pending' && deposit.issueReported) {
       statusColor = const Color(0xFF4CAF50);
-      statusLabel = 'READY TO VERIFY';
-    } else if (deposit.isWalletTimeout) {
-      statusColor = Colors.deepOrange;
-      statusLabel = 'TIMEOUT';
+      statusLabel = 'NEEDS REVIEW';
     }
 
     return Card(
@@ -152,7 +147,11 @@ class _DepositCard extends StatelessWidget {
                 const Spacer(),
                 _InfoBadge(label: deposit.network),
                 const SizedBox(width: 6),
-                _InfoBadge(label: deposit.walletAddress ?? '---'),
+                if (deposit.issueReported) ...[
+                  _InfoBadge(label: 'User reported issue'),
+                ] else if (deposit.walletAddress != null && deposit.walletAddress!.isNotEmpty && deposit.walletAddress != 'MaxelPay') ...[
+                  _InfoBadge(label: deposit.walletAddress!),
+                ],
               ],
             ),
             if (deposit.walletExpiresAt != null) ...[
@@ -164,7 +163,7 @@ class _DepositCard extends StatelessWidget {
               Text('Lock expires: ${_formatDate(deposit.expiresAt!)}', style: TextStyle(color: Colors.grey[500], fontSize: 11)),
             ],
             Text('Created: ${_formatDate(deposit.createdAt)}', style: TextStyle(color: Colors.grey[500], fontSize: 11)),
-            if (deposit.isReadyToVerify) ...[
+            if (deposit.status == 'pending' && deposit.issueReported) ...[
               const SizedBox(height: 8),
               Container(
                 width: double.infinity,
@@ -180,31 +179,8 @@ class _DepositCard extends StatelessWidget {
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Ready to verify — the user confirmed they made payment. Verify the wallet transaction, then approve.',
+                        'Needs review — the user reported a problem completing this deposit. Verify the payment, then approve or reject.',
                         style: TextStyle(color: Colors.green, fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ] else if (deposit.isWalletTimeout) ...[
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.deepOrange.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.deepOrange),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.timer_off, color: Colors.deepOrange, size: 18),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Payment TIMEOUT — the user never clicked "I have made payment" within the wallet window. Approve only if you confirm the payment actually arrived (a late payment may have been sent).',
-                        style: TextStyle(color: Colors.deepOrange, fontSize: 12),
                       ),
                     ),
                   ],

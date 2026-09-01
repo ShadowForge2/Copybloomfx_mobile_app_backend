@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:fluttertoast/fluttertoast.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:bloomfx_shared/bloomfx_shared.dart';
 import '../models/finance_models.dart';
 import '../providers/auth_provider.dart';
@@ -24,7 +24,6 @@ class _FinanceScreenState extends State<FinanceScreen> {
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _walletController = TextEditingController();
   final ScrollController _historyScrollController = ScrollController();
-  String _selectedNetwork = InvestmentLogic.depositNetworks.first;
 
   @override
   void initState() {
@@ -40,12 +39,6 @@ class _FinanceScreenState extends State<FinanceScreen> {
     _walletController.dispose();
     _historyScrollController.dispose();
     super.dispose();
-  }
-
-  List<String> _networksFor(DashboardProvider dash) {
-    final n = dash.finance?.networks;
-    if (n != null && n.isNotEmpty) return n;
-    return InvestmentLogic.depositNetworks;
   }
 
   @override
@@ -602,10 +595,6 @@ class _FinanceScreenState extends State<FinanceScreen> {
 
   void _showCryptoDepositModal(DashboardData? data, DashboardProvider dash, AppColors c) {
     _amountController.text = data?.minDeposit.toStringAsFixed(0) ?? '7';
-    final networks = _networksFor(dash);
-    if (!networks.contains(_selectedNetwork)) {
-      _selectedNetwork = networks.first;
-    }
     bool isProcessing = false;
 
     showModalBottomSheet(
@@ -643,38 +632,10 @@ class _FinanceScreenState extends State<FinanceScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Minimum \$${data?.minDeposit.toStringAsFixed(2) ?? '7.00'}. Credited automatically once payment is verified.',
+                'Minimum \$${data?.minDeposit.toStringAsFixed(2) ?? '7.00'}. You\u2019ll be redirected to complete the payment securely.',
                 style: TextStyle(color: c.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 20),
-              InputDecorator(
-                decoration: InputDecoration(
-                  labelText: 'Network',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  filled: true,
-                  fillColor: c.surfaceBg,
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    isExpanded: true,
-                    value: _selectedNetwork,
-                    dropdownColor: c.surfaceBg,
-                    style: TextStyle(color: c.textPrimary),
-                    items: networks
-                        .map(
-                          (n) => DropdownMenuItem(
-                            value: n,
-                            child: Text(n, style: TextStyle(color: c.textPrimary)),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (val) {
-                      if (val != null) setModalState(() => _selectedNetwork = val);
-                    },
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
               TextField(
                 controller: _amountController,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -702,13 +663,17 @@ class _FinanceScreenState extends State<FinanceScreen> {
                             return;
                           }
                           setModalState(() => isProcessing = true);
-                          final dep = await dash.submitDeposit(
-                            amount: amt,
-                            network: _selectedNetwork,
-                          );
+                          final dep = await dash.submitDeposit(amount: amt);
                           if (!context.mounted) return;
                           Navigator.pop(context);
                           if (dep != null) {
+                            final url = dep.checkoutUrl;
+                            if (url != null && url.isNotEmpty) {
+                              final uri = Uri.parse(url);
+                              if (await canLaunchUrl(uri)) {
+                                launchUrl(uri, mode: LaunchMode.externalApplication);
+                              }
+                            }
                             context.read<NotificationProvider>().fetchNotifications();
                             NotificationService.instance.showDepositPending(dep.amount);
                             _showPendingDepositDialog(dep, dash, c);
@@ -736,7 +701,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                             Text('Processing...'),
                           ],
                         )
-                      : const Text('Submit crypto deposit'),
+                      : const Text('Continue to payment'),
                 ),
               ),
               const SizedBox(height: 20),
@@ -1202,46 +1167,31 @@ class _FinanceScreenState extends State<FinanceScreen> {
   }
 
   void _showPendingDepositDialog(UserDeposit dep, DashboardProvider dash, AppColors c) {
-    const walletWindow = Duration(minutes: 10);
     const pollInterval = Duration(seconds: 3);
-    final walletCountdownEnd = dep.walletExpiresAt ?? DateTime.now().add(walletWindow);
-    final fixedExpiry = walletCountdownEnd;
-    ValueNotifier<DateTime> expiresAtNotifier = ValueNotifier(fixedExpiry);
     ValueNotifier<String> statusNotifier = ValueNotifier('pending');
     ValueNotifier<bool> approvedNotifier = ValueNotifier(false);
-    ValueNotifier<bool> confirmedNotifier = ValueNotifier(false);
-    ValueNotifier<bool> confirmingNotifier = ValueNotifier(false);
-    Timer? countdownTimer;
+    ValueNotifier<bool> rejectedNotifier = ValueNotifier(false);
+    ValueNotifier<bool> issueReportedNotifier = ValueNotifier(false);
+    ValueNotifier<bool> reportingNotifier = ValueNotifier(false);
     Timer? pollTimer;
 
     showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
-        countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-          final remaining = fixedExpiry.difference(DateTime.now());
-          if (remaining.isNegative) {
-            timer.cancel();
-            expiresAtNotifier.value = fixedExpiry;
-          }
-        });
-
         pollTimer = Timer.periodic(pollInterval, (_) async {
           final token = await AuthService.getToken();
           if (token == null) return;
-          final apiService = ApiService(baseUrl: 'https://copybloomfx-mobile-app-backend-nb7f.onrender.com', authToken: token);
+          final apiService = ApiService(baseUrl: dash.apiBaseUrl, authToken: token);
           final res = await apiService.getDepositStatus(dep.id);
           if (res.success && res.data != null) {
             final status = res.data!['status']?.toString() ?? 'pending';
-            final paymentStatus = res.data!['paymentStatus']?.toString();
+            final issueReported = res.data!['issueReported'] == true;
             statusNotifier.value = status;
-            if (paymentStatus == 'paid') {
-              confirmedNotifier.value = true;
-            }
+            issueReportedNotifier.value = issueReported;
             if (status == 'approved') {
               approvedNotifier.value = true;
               pollTimer?.cancel();
-              countdownTimer?.cancel();
               if (context.mounted) {
                 context.read<NotificationProvider>().fetchNotifications();
                 context.read<DashboardProvider>().fetchFinance();
@@ -1249,301 +1199,213 @@ class _FinanceScreenState extends State<FinanceScreen> {
               }
               NotificationService.instance.showDepositApproved(dep.amount);
             } else if (status == 'rejected') {
+              rejectedNotifier.value = true;
               pollTimer?.cancel();
-              countdownTimer?.cancel();
             }
           }
         });
 
         return PopScope(
-          canPop: approvedNotifier.value,
-          child: ValueListenableBuilder<String>(
-            valueListenable: statusNotifier,
-            builder: (context, status, _) {
-              return ValueListenableBuilder<bool>(
-                valueListenable: approvedNotifier,
-                builder: (context, approved, _) {
-                  if (approved) {
-                    Future.delayed(const Duration(milliseconds: 2500), () {
-                      if (ctx.mounted) Navigator.of(ctx).pop();
-                    });
-                    return AlertDialog(
-                      backgroundColor: c.surfaceBg,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
+          canPop: approvedNotifier.value || rejectedNotifier.value,
+          child: ValueListenableBuilder<bool>(
+            valueListenable: approvedNotifier,
+            builder: (context, approved, _) {
+              if (approved) {
+                Future.delayed(const Duration(milliseconds: 2500), () {
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                });
+                return AlertDialog(
+                  backgroundColor: c.surfaceBg,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(height: 20),
+                      TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0.0, end: 1.0),
+                        duration: const Duration(milliseconds: 800),
+                        builder: (context, value, child) {
+                          return Transform.scale(
+                            scale: value,
+                            child: Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                color: Colors.green.withValues(alpha: 0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.check_circle,
+                                color: Colors.green,
+                                size: 60,
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                      content: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SizedBox(height: 20),
-                          TweenAnimationBuilder<double>(
-                            tween: Tween(begin: 0.0, end: 1.0),
-                            duration: const Duration(milliseconds: 800),
-                            builder: (context, value, child) {
-                              return Transform.scale(
-                                scale: value,
-                                child: Container(
-                                  width: 80,
-                                  height: 80,
-                                  decoration: BoxDecoration(
-                                    color: Colors.green.withValues(alpha: 0.15),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.check_circle,
-                                    color: Colors.green,
-                                    size: 60,
+                      const SizedBox(height: 20),
+                      Text(
+                        'Deposit Approved!',
+                        style: TextStyle(
+                          color: c.textPrimary,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '\$${dep.amount.toStringAsFixed(2)} credited to tradable balance.',
+                        style: const TextStyle(color: Colors.white70, fontSize: 14),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        'Closing automatically...',
+                        style: TextStyle(color: c.textSecondary, fontSize: 12),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                  ),
+                );
+              }
+
+              return ValueListenableBuilder<bool>(
+                valueListenable: rejectedNotifier,
+                builder: (context, rejected, _) {
+                  return ValueListenableBuilder<bool>(
+                    valueListenable: issueReportedNotifier,
+                    builder: (context, reported, _) {
+                      return AlertDialog(
+                        backgroundColor: c.surfaceBg,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        title: Row(
+                          children: [
+                            Icon(
+                              rejected ? Icons.cancel : Icons.access_time,
+                              color: rejected ? Colors.red : Colors.orange,
+                              size: 22,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              rejected ? 'Deposit Rejected' : 'Awaiting Deposit',
+                              style: TextStyle(color: c.textPrimary, fontSize: 18),
+                            ),
+                          ],
+                        ),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Awaiting deposit of \$${dep.amount.toStringAsFixed(2)}. Your deposit will be credited automatically once payment is confirmed.',
+                              style: const TextStyle(color: Colors.white70, fontSize: 13),
+                            ),
+                            if (dep.checkoutUrl != null && dep.checkoutUrl!.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () async {
+                                    final uri = Uri.parse(dep.checkoutUrl!);
+                                    if (await canLaunchUrl(uri)) {
+                                      launchUrl(uri, mode: LaunchMode.externalApplication);
+                                    }
+                                  },
+                                  icon: const Icon(Icons.open_in_new, size: 16),
+                                  label: const Text('Open payment page'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: c.accentBlue,
+                                    side: BorderSide(color: c.accentBlue),
+                                    minimumSize: const Size(0, 40),
                                   ),
                                 ),
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 20),
-                          Text(
-                            'Deposit Approved!',
-                            style: TextStyle(
-                              color: c.textPrimary,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '\$${dep.amount.toStringAsFixed(2)} credited to tradable balance.',
-                            style: const TextStyle(color: Colors.white70, fontSize: 14),
-                          ),
-                          const SizedBox(height: 24),
-                          Text(
-                            'Closing automatically...',
-                            style: TextStyle(color: c.textSecondary, fontSize: 12),
-                          ),
-                          const SizedBox(height: 10),
-                        ],
-                      ),
-                    );
-                  }
-
-                  return AlertDialog(
-                    backgroundColor: c.surfaceBg,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    title: Row(
-                      children: [
-                        Icon(
-                          status == 'rejected' ? Icons.cancel : status == 'expired' ? Icons.timer_off : Icons.access_time,
-                          color: status == 'rejected' ? Colors.red : status == 'expired' ? Colors.grey : Colors.orange,
-                          size: 22,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          status == 'rejected' ? 'Deposit Rejected' : status == 'expired' ? 'Deposit Expired' : 'Deposit Pending',
-                          style: TextStyle(color: c.textPrimary, fontSize: 18),
-                        ),
-                      ],
-                    ),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Send the exact amount to the address below:',
-                          style: TextStyle(color: Colors.white70, fontSize: 13),
-                        ),
-                        const SizedBox(height: 16),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: c.cardBg,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: c.border),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Amount: \$${dep.amount.toStringAsFixed(2)}',
-                                style: TextStyle(color: c.textPrimary, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 8),
-                              Text('Network:', style: TextStyle(color: c.textSecondary, fontSize: 12)),
-                              Text(dep.network, style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                              const SizedBox(height: 8),
-                              Text('Wallet Address:', style: TextStyle(color: c.textSecondary, fontSize: 12)),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: SelectableText(
-                                      dep.walletAddress ?? '',
-                                      style: TextStyle(color: c.accentBlue, fontSize: 13),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  InkWell(
-                                    onTap: () async {
-                                      final addr = (dep.walletAddress ?? '').trim();
-                                      if (addr.isEmpty) return;
-                                      await Clipboard.setData(ClipboardData(text: addr));
-                                      if (ctx.mounted) {
-                                        Fluttertoast.showToast(
-                                          msg: 'Address copied',
-                                          backgroundColor: Colors.green,
-                                          textColor: Colors.white,
-                                        );
-                                      }
-                                    },
-                                    borderRadius: BorderRadius.circular(6),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: c.accentBlue.withValues(alpha: 0.15),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.copy, color: c.accentBlue, size: 16),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            'Copy',
-                                            style: TextStyle(color: c.accentBlue, fontSize: 12, fontWeight: FontWeight.bold),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
                               ),
                             ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        ValueListenableBuilder<DateTime>(
-                          valueListenable: expiresAtNotifier,
-                          builder: (context, expiresAt, _) {
-                            final remaining = expiresAt.difference(DateTime.now());
-                            final seconds = remaining.inSeconds.clamp(0, 600);
-                            final minutes = seconds ~/ 60;
-                            final secs = seconds % 60;
-                            final isExpired = seconds <= 0;
-                            return Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: isExpired ? Colors.red.withValues(alpha: 0.1) : c.cardBg,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: isExpired ? Colors.red : c.border,
+                            const SizedBox(height: 12),
+                            if (rejected)
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    isExpired ? Icons.timer_off : Icons.timer,
-                                    color: isExpired ? Colors.red : Colors.orange,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    isExpired
-                                        ? 'Address window ended — start a new deposit to get a fresh address. Your request stays safely queued for verification.'
-                                        : 'Wallet address reserved for ${minutes}m ${secs}s',
-                                    style: TextStyle(
-                                      color: isExpired ? Colors.red : Colors.white70,
-                                      fontSize: 12,
+                                child: const Row(
+                                  children: [
+                                    Icon(Icons.info, color: Colors.red, size: 18),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'This deposit could not be verified. Contact support if you already sent payment.',
+                                      style: TextStyle(color: Colors.red, fontSize: 12),
                                     ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        if (status == 'rejected')
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.red.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Row(
-                              children: [
-                                Icon(Icons.info, color: Colors.red, size: 18),
-                                SizedBox(width: 8),
-                                Text(
-                                  'This deposit could not be verified. Contact support if you already sent payment.',
-                                  style: TextStyle(color: Colors.red, fontSize: 12),
+                                  ],
                                 ),
-                              ],
-                            ),
-                          )
-                        else
-                          ValueListenableBuilder<bool>(
-                            valueListenable: confirmedNotifier,
-                            builder: (context, confirmed, _) {
-                              if (confirmed) {
-                                return Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    color: Colors.green.withValues(alpha: 0.10),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.green),
-                                  ),
-                                  child: const Row(
-                                    children: [
-                                      Icon(Icons.verified_user, color: Colors.green, size: 18),
-                                      SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          'Payment confirmed — awaiting admin verification. Your deposit will be credited once verified.',
-                                          style: TextStyle(color: Colors.green, fontSize: 12),
-                                        ),
+                              )
+                            else if (reported)
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.10),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.green),
+                                ),
+                                child: const Row(
+                                  children: [
+                                    Icon(Icons.verified_user, color: Colors.green, size: 18),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Support is reviewing your deposit. You\u2019ll be notified once it\u2019s resolved.',
+                                        style: TextStyle(color: Colors.green, fontSize: 12),
                                       ),
-                                    ],
-                                  ),
-                                );
-                              }
-                              return Column(
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
                                   ValueListenableBuilder<bool>(
-                                    valueListenable: confirmingNotifier,
-                                    builder: (context, confirming, _) {
-                                      return ElevatedButton.icon(
-                                        onPressed: confirming
+                                    valueListenable: reportingNotifier,
+                                    builder: (context, reporting, _) {
+                                      return OutlinedButton.icon(
+                                        onPressed: reporting
                                             ? null
                                             : () async {
-                                                confirmingNotifier.value = true;
-                                                final ok = await dash.confirmDepositPayment(dep.id);
-                                                confirmingNotifier.value = false;
+                                                reportingNotifier.value = true;
+                                                final ok = await dash.reportDepositIssue(dep.id);
+                                                reportingNotifier.value = false;
                                                 if (!context.mounted) return;
                                                 if (ok) {
-                                                  confirmedNotifier.value = true;
+                                                  issueReportedNotifier.value = true;
                                                   Fluttertoast.showToast(
-                                                    msg: 'Payment marked as sent — ready for verification',
+                                                    msg: 'Deposit flagged for review — support will check it',
                                                     backgroundColor: Colors.green,
                                                     textColor: Colors.white,
                                                   );
                                                 } else {
                                                   Fluttertoast.showToast(
-                                                    msg: dash.errorMessage ?? 'Failed to confirm payment',
+                                                    msg: dash.errorMessage ?? 'Failed to report the issue',
                                                     backgroundColor: Colors.red,
                                                     textColor: Colors.white,
                                                   );
                                                 }
                                               },
-                                        icon: confirming
+                                        icon: reporting
                                             ? const SizedBox(
                                                 width: 16,
                                                 height: 16,
                                                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                                               )
-                                            : const Icon(Icons.check, size: 18),
-                                        label: Text(confirming ? 'Sending...' : 'I Have Made Payment'),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: const Color(0xFF2E7D32),
-                                          foregroundColor: Colors.white,
+                                            : const Icon(Icons.help_outline, size: 18),
+                                        label: Text(reporting ? 'Sending...' : 'Having a problem?'),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: const Color(0xFFFF6F00),
+                                          side: const BorderSide(color: Color(0xFFFF6F00)),
                                           minimumSize: const Size(0, 44),
                                         ),
                                       );
@@ -1559,30 +1421,29 @@ class _FinanceScreenState extends State<FinanceScreen> {
                                       ),
                                       const SizedBox(width: 8),
                                       Text(
-                                        'Checking for approval...',
+                                        'Checking for payment confirmation...',
                                         style: TextStyle(color: c.textSecondary, fontSize: 12),
                                       ),
                                     ],
                                   ),
                                 ],
-                              );
-                            },
-                          ),
-                      ],
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () {
-                          countdownTimer?.cancel();
-                          pollTimer?.cancel();
-                          Navigator.of(ctx).pop();
-                        },
-                        child: Text(
-                          status == 'rejected' ? 'Close' : 'Close & check later',
-                          style: TextStyle(color: c.accentBlue),
+                              ),
+                          ],
                         ),
-                      ),
-                    ],
+                        actions: [
+                          TextButton(
+                            onPressed: () {
+                              pollTimer?.cancel();
+                              Navigator.of(ctx).pop();
+                            },
+                            child: Text(
+                              rejected ? 'Close' : 'Close & check later',
+                              style: TextStyle(color: c.accentBlue),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   );
                 },
               );
@@ -1591,7 +1452,6 @@ class _FinanceScreenState extends State<FinanceScreen> {
         );
       },
     ).whenComplete(() {
-      countdownTimer?.cancel();
       pollTimer?.cancel();
     });
   }
