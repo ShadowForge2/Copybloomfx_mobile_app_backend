@@ -1266,7 +1266,17 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
       p.lockedBalance,
       _seedRanks,
     );
-    final rid = resolved?.id ?? p.rankId;
+    // Prefer the server-declared current rank (backend is authoritative; a user
+    // always has a rank once assigned). Otherwise pick the higher of the
+    // balance-derived rank and the persisted backend rank so a low/zero locked
+    // balance never erases the indicator for the rank the user actually holds.
+    final serverCurrentId = _firstCurrentRankId(d.ranks);
+    final balanceId = resolved?.id;
+    final persistedId = p.rankId;
+    final rid = serverCurrentId ??
+        ((balanceId != null && balanceId > persistedId)
+            ? balanceId
+            : persistedId);
     final ranks = d.ranks.isNotEmpty
         ? d.ranks.map((r) => r.copyWith(isCurrent: r.id == rid)).toList()
         : InvestmentLogic.ranksWithCurrentFlag(_seedRanks, rid);
@@ -1302,6 +1312,13 @@ class DashboardProvider extends ChangeNotifier with WidgetsBindingObserver {
       minDeposit: d.minDeposit,
       minWithdrawal: d.minWithdrawal,
     );
+  }
+
+  static int? _firstCurrentRankId(List<Rank> ranks) {
+    for (final r in ranks) {
+      if (r.isCurrent) return r.id;
+    }
+    return null;
   }
 
   /// Clear all cached data to prevent data bleed when switching users
